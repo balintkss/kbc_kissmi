@@ -11,11 +11,13 @@ import sqlite3
 import time
 from collections import defaultdict, deque
 
+import api.env  # noqa: F401  (must run before api.security reads TWIN_SECRET)
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from api.security import issue_token, read_token, verify_password
+from twin.assistant import Assistant
 from twin.catalog import CATALOG
 from twin.engine import DB
 from twin.recommender import moments, page
@@ -50,6 +52,9 @@ def db():
 with sqlite3.connect(DB) as _con:
     _con.execute("""CREATE TABLE IF NOT EXISTS twin_feedback (
         customer_id INTEGER NOT NULL, fact TEXT NOT NULL, correct INTEGER NOT NULL, note TEXT, created_at REAL NOT NULL)""")
+    _con.execute("""CREATE TABLE IF NOT EXISTS chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL, role TEXT NOT NULL,
+        content TEXT NOT NULL, created_at TEXT NOT NULL)""")
 
 
 # ---------------------------------------------------------------------- auth
@@ -58,11 +63,11 @@ _attempts = defaultdict(deque)
 MAX_ATTEMPTS, WINDOW = 5, 300
 
 
-def _rate_limited(key):
+def _rate_limited(key, limit=MAX_ATTEMPTS, window=WINDOW):
     q, now = _attempts[key], time.time()
-    while q and q[0] < now - WINDOW:
+    while q and q[0] < now - window:
         q.popleft()
-    if len(q) >= MAX_ATTEMPTS:
+    if len(q) >= limit:
         return True
     q.append(now)
     return False
@@ -191,3 +196,28 @@ def fact_feedback(body: Feedback, fact: str = Path(pattern=r"^[a-z_]{1,40}$"), c
     con.execute("INSERT INTO twin_feedback VALUES (?,?,?,?,?)", (cid, fact, int(body.correct), body.note, time.time()))
     con.commit()
     return {"fact": fact, "correct": body.correct}
+
+
+# ---------------------------------------------------------------------- chat (pull)
+
+class ChatIn(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+
+
+@app.get("/api/me/chat")
+def chat_history(cid=Depends(current_customer), con=Depends(db)):
+    """History plus Kate's opener, so the customer never has to start from zero."""
+    kate = Assistant(con, cid, load_twin(con, cid))
+    return {"opener": kate.opener(), "history": kate.history(limit=30)}
+
+
+@app.post("/api/me/chat")
+def chat(body: ChatIn, request: Request, cid=Depends(current_customer), con=Depends(db)):
+    if _rate_limited(f"chat:{cid}", limit=20, window=60):
+        raise HTTPException(429, "Slow down a little")
+    try:
+        return Assistant(con, cid, load_twin(con, cid)).reply(body.message)
+    except Exception as e:  # never leak provider errors or keys to the client
+        if e.__class__.__module__.startswith("openai"):
+            raise HTTPException(503, "Kate is unavailable right now") from None
+        raise

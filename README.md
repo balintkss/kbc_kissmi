@@ -30,7 +30,18 @@ Fuel purchase ─► FACT  owns a car (petrol, since 13 Jun 2026, 90% confident,
 ### Two-way communication
 
 - **Push (the system attracts the user)** — on salary day: *"€2,850 arrives on 23 Oct. Bills €1,458, set aside €131, save €200 — that leaves €151/week to spend freely."* Plus life-moment messages (new car, baby, move, new job) — ranked, max 2 pushes, and sales messages are **held back** if the customer shows money stress.
-- **Pull (the user asks the system)** — the customer asks *"Can I afford a €1,200 holiday in August?"* and the answer uses the twin's context: salary day, bills, reserves, buffer. No forms, no follow-up questions. *(LLM chat — in progress)*
+- **Pull (the user asks the system)** — the customer asks *"Can I afford a €1,200 holiday in August?"* and the answer uses the twin's context: salary day, bills, reserves, buffer. No forms, no follow-up questions.
+
+### Kate, with the twin as her memory (`twin/assistant.py`)
+
+KBC's Kate runs on GPT-4.1, so we mimic her on the same model — but she now *knows* the customer:
+
+- The system prompt carries a compact twin (facts, implications, payday plan, recurring bills).
+- **The LLM never does the maths.** It calls tools that compute on the twin: `check_affordability`, `spending_summary`, `recommend_product` (the same one-highlight logic as the web/app pages) and `payday_plan`.
+- Tools are bound to the logged-in customer on the server; the model cannot pick a customer id → prompt injection can't reach other customers' data.
+- Rules: never ask what the twin already knows, recommend ONE option with the reason, no selling under money stress, reply in the customer's language (detected per message: nl/fr/en), general guidance only — an advisor for binding advice.
+
+Example (Lotte, in Dutch): *"Welke autoverzekering past bij mij?"* → *"Een mini-omnium past het best bij je tweedehandswagen van €11.500 … Je bent nu verzekerd bij Ethias, maar ik kan snel een KBC-offerte maken."*
 
 ### One engine, every channel
 
@@ -105,7 +116,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m twin.evaluate             # accuracy vs. hidden truth
 .venv/bin/python -m twin.engine --customer 1  # print Lotte's twin as JSON
 .venv/bin/python -m api.seed_credentials      # logins; demo persona passwords -> data/demo_credentials.txt (git-ignored)
-TWIN_SECRET=$(openssl rand -hex 32) .venv/bin/uvicorn api.main:app --reload   # API docs at http://localhost:8000/api/docs
+cp .env.example .env                          # then fill in OPENAI_API_KEY and a random TWIN_SECRET
+.venv/bin/uvicorn api.main:app --reload       # API docs at http://localhost:8000/api/docs
 ```
 
 ### API (same JSON for app and website)
@@ -117,6 +129,8 @@ TWIN_SECRET=$(openssl rand -hex 32) .venv/bin/uvicorn api.main:app --reload   # 
 | `GET /api/me/twin?with_evidence=true` | required | Glass box: every fact, confidence, since, implications and the proving transactions |
 | `GET /api/me/plan` | required | Payday plan: bills, reserves, savings, free to spend per week |
 | `GET /api/me/moments` | required | `push` (max 2), `feed`, and `held_back` (sales suppressed under money stress) |
+| `GET /api/me/chat` | required | Kate's opener (top proactive moment) + chat history |
+| `POST /api/me/chat` | required | `{message}` → Kate's answer + which tools she used. Rate-limited. |
 | `POST /api/me/facts/{fact}/feedback` | required | `{correct, note}` — the customer corrects their twin; rejected facts stop driving recommendations |
 
 The generator is seeded, so everyone gets the same database.
@@ -136,7 +150,7 @@ The generator is seeded, so everyone gets the same database.
 - [x] Recommender: highlight-one pages + push moments with silence rules
 - [x] API with login, experience blocks, glass-box twin, plan, moments
 - [x] Customer correction of facts ("that's not right") — note: the payday plan is precomputed, so a rejected car still shows its reserve until the twin is rebuilt
-- [ ] LLM chat over the twin ("pull"), in the customer's language (nl/fr/en)
+- [x] Kate chat over the twin ("pull") with grounded tools, in the customer's language (nl/fr/en)
 - [ ] App + website frontends, ops dashboard for the 5K population
 - [ ] Aikido scan before/after, demo video
 
