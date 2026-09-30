@@ -170,21 +170,57 @@ def test_customer_endpoints_require_a_token(client, method, path, body):
     assert r.headers.get("www-authenticate", "").lower().startswith("bearer")
 
 
-def test_every_registered_me_route_requires_a_token(client, api_main):
-    """Catches new /api/me* routes that forget the auth dependency."""
-    checked = 0
-    for route in api_main.app.routes:
-        path = getattr(route, "path", "")
-        if not path.startswith("/api/me"):
+PATH_PARAM_VALUES = {"fact": "has_car", "topic": "car_insurance"}  # anything else gets "x"
+ANY_ME_BODY = {"message": "hi", "correct": False, "pots": ["bills"]}  # valid for every known /api/me POST
+FORESIGHT_ROUTES = {("GET", "/api/me/forecast"), ("GET", "/api/me/payday-sorter"),
+                    ("POST", "/api/me/payday-sorter/approve"), ("POST", "/api/me/payday-sorter/revoke"),
+                    ("GET", "/api/me/self-employed"), ("GET", "/api/me/moments-plus")}
+
+
+def _is_me_path(path):
+    return path == "/api/me" or path.startswith("/api/me/")
+
+
+def _walk_routes(routes, prefix=""):
+    """(METHOD, path) of every route, descending into included routers.
+
+    FastAPI 0.142 keeps an included router as one `_IncludedRouter` entry without `.path` (its routes live on
+    `.original_router`), so a flat walk over `app.routes` silently skips ops, foresight, life, memory, ..."""
+    for route in routes:
+        inner = getattr(route, "original_router", None)
+        if inner is not None:
+            ctx = getattr(route, "include_context", None)
+            yield from _walk_routes(inner.routes, prefix + (getattr(ctx, "prefix", "") or ""))
             continue
-        concrete = path.replace("{fact}", "has_car")
-        for method in sorted(getattr(route, "methods", None) or ()):
-            if method in ("HEAD", "OPTIONS"):
-                continue
-            body = {"message": "hi", "correct": False} if method == "POST" else None
-            assert call(client, method, concrete, body=body).status_code == 401, f"{method} {path} is open"
-            checked += 1
-    assert checked >= len({(m, p.split("?")[0]) for m, p, _ in ME_ENDPOINTS})
+        path = getattr(route, "path", None)
+        for method in getattr(route, "methods", None) or ():
+            if path:
+                yield method, prefix + path
+
+
+def _me_routes(app):
+    """Every /api/me* (METHOD, path): the OpenAPI spec (public, version-proof) plus a walk over the router tree
+    (also catches routes with include_in_schema=False)."""
+    found = {(m.upper(), p) for p, ops in app.openapi()["paths"].items() if _is_me_path(p) for m in ops}
+    found |= {(m, p) for m, p in _walk_routes(app.routes) if _is_me_path(p)}
+    return {(m, p) for m, p in found if m not in ("HEAD", "OPTIONS")}
+
+
+def test_every_registered_me_route_requires_a_token(client, api_main):
+    """Catches new /api/me* routes (in api/main.py or any included router) that forget the auth dependency."""
+    def concrete(path):
+        for part in path.split("/"):
+            if part.startswith("{") and part.endswith("}"):
+                path = path.replace(part, PATH_PARAM_VALUES.get(part[1:-1].split(":")[0], "x"))
+        return path
+
+    routes = {(m, p, concrete(p)) for m, p in _me_routes(api_main.app)}
+    reached = {(m, c) for m, _, c in routes}
+    assert {(m, p.split("?")[0]) for m, p, _ in ME_ENDPOINTS} <= reached  # the walk sees api/main.py routes ...
+    assert FORESIGHT_ROUTES <= reached                                   # ... and included routers
+    for method, path, url in sorted(routes):
+        body = ANY_ME_BODY if method in ("POST", "PUT", "PATCH") else None
+        assert call(client, method, url, body=body).status_code == 401, f"{method} {path} is open"
 
 
 @pytest.mark.parametrize("kind", list(BAD_TOKENS))

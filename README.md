@@ -92,6 +92,7 @@ twin/catalog.py          moments(twin)      → push / feed / held-back messages
         ▼
 api/                     FastAPI, one API for all channels: login, experience blocks, twin, plan, moments, feedback, Kate
         │                api/ops.py + twin/population.py → /api/ops/*: population aggregates & advisor drill-down (ops role, audited)
+        │                api/routes_foresight.py + twin/forecast.py, sorter.py, selfemployed.py → money foresight (forecast, payday sorter, self-employed reserve)
         │
         ▼
 web/                     customer app view + website view, rendering the same experience blocks (owned by our frontend teammate, in progress)
@@ -146,6 +147,12 @@ cp .env.example .env                          # then fill in OPENAI_API_KEY and 
 | `GET /api/me/chat` | required | Kate's opener (top proactive moment) + chat history |
 | `POST /api/me/chat` | required | `{message}` → Kate's answer + which tools she used. Rate-limited. |
 | `POST /api/me/facts/{fact}/feedback` | required | `{correct, note}` — the customer corrects their twin; rejected facts stop driving recommendations |
+| `GET /api/me/forecast` | required | Money foresight: day-by-day balance projection until payday (35 days without a fixed payday), safe to spend per day, lowest point, **early overdraft warning** + top-up suggestion |
+| `GET /api/me/payday-sorter` | required | Kate's proposed split of the next payday into pots (bills, reserves, savings, free to spend) + the active mandate. Simulation: nothing moves |
+| `POST /api/me/payday-sorter/approve` | required | `{pots: [ids]}` — **approve-to-act**: pot ids only, amounts are always recomputed server-side; unknown / non-movable ids → 422. Rate-limited |
+| `POST /api/me/payday-sorter/revoke` | required | Stop the active payday-sorter mandate |
+| `GET /api/me/self-employed` | required | Self-employed reserve: % of every invoice to set aside for social contributions and tax prepayments (indicative, Belgian 2026 rates), or `{applicable: false}` |
+| `GET /api/me/moments-plus` | required | `/api/me/moments` plus the foresight moments (`overdraft_warning`, `self_employed_reserve`) — the app home feed |
 | `GET /ops` | – (login in page) | Ops & advisor dashboard (static, same origin, strict CSP; token kept in memory only) |
 | `POST /api/ops/login` | – | `{username, password}` → **ops-role** token (1 h). Rate-limited per IP and per username. Customer tokens never work on `/api/ops/*`, ops tokens never work on `/api/me/*` |
 | `GET /api/ops/overview` | ops | Population aggregates, counts only: coverage, life events (90 d), pushes / held back, opportunities, highlight mix, 2.3M scale projection |
@@ -161,6 +168,15 @@ The generator is seeded, so everyone gets the same customers and transactions. P
 - `TWIN_SECRET` comes from the environment (see `.env.example`); without it a random per-process secret is used. No real customer data anywhere.
 - `truth_*` tables are for evaluation only and never exposed through the API.
 
+## Docs
+
+- [`AGENTS.md`](AGENTS.md) — repo map, full API contract and screens for the frontend (read first)
+- [`docs/EXECUTIVE_SUMMARY.md`](docs/EXECUTIVE_SUMMARY.md) — one-page summary
+- [`docs/KBC_SERVICE_MAP.md`](docs/KBC_SERVICE_MAP.md) — where the twin fits in KBC's services, with sources
+- [`docs/KBC_VALUE_MATRIX.md`](docs/KBC_VALUE_MATRIX.md) — product-value matrix, guardrails, proof points
+- [`docs/PRIVATE_BANKER_AT_SCALE.md`](docs/PRIVATE_BANKER_AT_SCALE.md) — business case: private-banker quality at retail scale
+- [`docs/PITCH.md`](docs/PITCH.md), [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md), [`docs/DATABASE_HANDOFF.md`](docs/DATABASE_HANDOFF.md) — pitch kit, demo video script, database/API handoff
+
 ## Status / unfinished
 
 - [x] Synthetic data generator (5K customers, Belgian specifics, planted life events, demo personas)
@@ -172,7 +188,8 @@ The generator is seeded, so everyone gets the same customers and transactions. P
 - [x] Kate chat over the twin ("pull") with grounded tools, in the customer's language (nl/fr/en)
 - [x] Ops & advisor dashboard for the 5K population (`/ops`, separate ops login, every customer access audited)
 - [x] Money-stress demo persona (5, Jens): sales held back, support first
-- [x] Test suite: 424 tests, all passing (`python -m pytest -q`)
+- [x] Money foresight: overdraft early warning, payday sorter (approve-to-act, simulated), self-employed reserve
+- [x] Test suite: 492 tests, all passing (`python -m pytest -q`)
 - [ ] App + website frontends (`web/`, our frontend teammate)
 - [ ] Aikido scan before/after, demo video
 

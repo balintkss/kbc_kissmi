@@ -29,6 +29,7 @@ Team: **A** = backend (data, twin, recommender, API, Kate; built with Claude). *
 | `docs/PITCH.md`, `docs/DEMO_SCRIPT.md` | Builderbase texts, elevator pitch, judge Q&A, scale & LLM cost numbers; 2:45 shot-by-shot video script + demo reset SQL | Both. Read before building demo screens |
 | `docs/KBC_VALUE_MATRIX.md` | KBC product-value matrix, competitive narrative, product guardrails and presentation-ready proof points | Both. Use for pitch, presentation and product decisions |
 | `docs/PRIVATE_BANKER_AT_SCALE.md` | Business case: private-banker-quality-at-scale framing, pilot metrics and a purpose-limited fraud extension | Both. Use for business case, judge Q&A and roadmap; fraud must remain separate from commercial profiling |
+| `docs/EXECUTIVE_SUMMARY.md`, `docs/KBC_SERVICE_MAP.md` | One-page summary; where the twin fits in KBC's services (feature ideas such as the payday sorter and overdraft forecast, with sources in `docs/research/`) | Both |
 | `twin/feedback.py` | Applies customer corrections to a twin (marks facts, recomputes the plan) | **A: do not edit** |
 | `twin/benchmark.py` | Read-only speed benchmark behind the 2.3M projection | A |
 | `docs/DATABASE_HANDOFF.md` | Database and API connection contract for humans and coding agents | Read before any database or frontend integration |
@@ -49,8 +50,12 @@ Team: **A** = backend (data, twin, recommender, API, Kate; built with Claude). *
 | `api/ops.py` | Ops & advisor channel: `/api/ops/*` (ops-role tokens only, audited) and the static `/ops` dashboard | **A: do not edit** |
 | `api/seed_ops.py` | Creates/rotates the ops login `advisor`, writes it to `data/ops_credentials.txt` | A |
 | `twin/population.py` | Population aggregates, advisor picker and drill-down behind `/api/ops/*` | **A: do not edit** |
+| `api/routes_foresight.py` | Money foresight: `/api/me/forecast`, `/api/me/payday-sorter` (+ `/approve`, `/revoke`), `/api/me/self-employed`, `/api/me/moments-plus`. Customer token only, mounted by `api/main.py` | **A: do not edit** |
+| `twin/forecast.py` | Day-by-day current-account projection until payday: safe to spend per day, lowest point, overdraft warning + top-up, the foresight moments | **A: do not edit** |
+| `twin/sorter.py` | Approve-to-act payday sorter: pots from the payday plan, mandates in the `sorter_mandates` table. Simulation, nothing moves | **A: do not edit** |
+| `twin/selfemployed.py` | Self-employed set-aside envelope: % of every invoice for social contributions + tax prepayments (Belgian 2026 rates, indicative) | **A: do not edit** |
 | `dashboard/` | The ops / advisor view (plain JS + CSS, served at `/ops`, strict CSP) | **A: do not edit** |
-| `tests/` | pytest suite (API, ops, twin, Kate with a scripted fake LLM, hardening). No real OpenAI calls; DB tests skip on a fresh clone | A |
+| `tests/` | pytest suite (API, ops, twin, foresight, Kate with a scripted fake LLM, hardening). No real OpenAI calls; DB tests skip on a fresh clone | A |
 | `pytest.ini`, `requirements-dev.txt` | Test config (`needs_db` marker) and test deps (`-r requirements.txt` + pytest) | A |
 | `requirements.txt`, `.env.example` | Python deps, env placeholders (no real values) | A (coordinate) |
 | `.env` | Local secrets | git-ignored. **Never commit or print** |
@@ -96,11 +101,12 @@ Base: `http://localhost:8000`. JSON in and out. Auth: header `Authorization: Bea
 |---|---|---|
 | 401 | `"Login required"` / `"Invalid or expired session"` (on login: `"Invalid customer id or password"`) | Drop the token and go to login (on the login screen, show "wrong id or password") |
 | 404 | `"Unknown topic"`, `"Unknown fact"`, `"No twin built for this customer yet"` | Friendly empty state |
+| 409 | Payday sorter approve without a regular income: `"We don't see a regular income yet, so there's no payday to sort."` | Show the message, hide the approve button |
 | 422 | Validation error. `detail` is an **array** of `{loc, msg, ...}` | Show a generic message |
-| 429 | Login: `"Too many attempts, try again in a few minutes"`. Chat: `"Slow down a little"` | Show the message and wait |
+| 429 | Login: `"Too many attempts, try again in a few minutes"`. Chat and payday-sorter POSTs: `"Slow down a little"` | Show the message and wait |
 | 503 | `"Kate is unavailable right now"` | Show it inside the chat and let the user retry |
 
-Errors are `{"detail": "..."}`. **Rate limits** are in memory and reset on API restart. Login allows **5 failed attempts per 5 min per IP and per customer id**. Successful logins don't count (and a success resets that customer's counter), so logging personas in and out during the demo is fine. The 6th failure within 5 min gives 429, even with the right password. Chat allows 20 messages/min per customer.
+Errors are `{"detail": "..."}`. **Rate limits** are in memory and reset on API restart. Login allows **5 failed attempts per 5 min per IP and per customer id**. Successful logins don't count (and a success resets that customer's counter), so logging personas in and out during the demo is fine. The 6th failure within 5 min gives 429, even with the right password. Chat allows 20 messages/min per customer; the payday-sorter POSTs (approve + revoke together) 10/min per customer.
 
 ### POST /api/auth/login (no auth)
 ```json
@@ -197,8 +203,9 @@ After a customer rejects a fact that shaped the plan, the plan is recomputed on 
  "feed": [],
  "held_back": []}
 ```
+- **For the app home, use `GET /api/me/moments-plus`** (same shape, plus the money-foresight moments, see below). `/api/me/moments` stays exactly as it is, for compatibility.
 - `push` has at most 2 items. The rest go to `feed`. Items are sorted by priority.
-- `kind` is one of `salary_plan | support | new_car | new_baby | moved | new_job`.
+- `kind` is one of `salary_plan | support | new_car | new_baby | moved | new_job` (moments-plus adds `overdraft_warning | self_employed_reserve`).
 - If `topic` isn't null, it links to `/api/experience/{topic}`.
 - `held_back` items also have `held_because`. These are sales messages suppressed under money stress, useful for an "ops/why not" view.
 
@@ -227,8 +234,137 @@ After a customer rejects a fact that shaped the plan, the plan is recomputed on 
 ```
 - `note` is optional, max 280 characters. An unknown fact for this customer gives 404.
 - **The latest feedback wins**: "That's right" after "That's not me" undoes it.
-- A rejected fact immediately stops driving highlights, moments and Kate, **and the payday plan is recalculated** (reserves, fuel, savings). Refetch `/twin`, `/plan`, `/moments` and `/experience/*` afterwards.
+- A rejected fact immediately stops driving highlights, moments and Kate, **and the payday plan is recalculated** (reserves, fuel, savings). Refetch `/twin`, `/plan`, `/moments` (`/moments-plus`), `/experience/*` and the foresight screens (`/forecast`, `/payday-sorter`, `/self-employed`) afterwards.
 - Feedback persists in the local DB. To reset a persona locally: `sqlite3 data/kbc_twin.db "DELETE FROM twin_feedback WHERE customer_id=1"`.
+
+### Money foresight (auth): `api/routes_foresight.py`
+Warn **before** the problem and act only with approval. Customer token only (ops tokens get 401), no customer id anywhere, feedback-applied like `/plan` (a rejected fact changes these too). Every customer-facing `message` / `body` is pre-formatted English with friendly dates: render it as text.
+
+| Endpoint | Use it for |
+|---|---|
+| `GET /api/me/forecast` | Safe to spend until payday + early overdraft warning |
+| `GET /api/me/payday-sorter` | The proposed split of the next payday + the active mandate |
+| `POST /api/me/payday-sorter/approve` | `{"pots": [ids]}`: approve pots (simulated) |
+| `POST /api/me/payday-sorter/revoke` | Stop the active mandate |
+| `GET /api/me/self-employed` | Marc's set-aside envelope, `{"applicable": false}` for everyone else |
+| `GET /api/me/moments-plus` | `/moments` + `overdraft_warning` + `self_employed_reserve`: **the app home feed** |
+
+#### GET /api/me/forecast
+Lotte (1), trimmed:
+```json
+{"as_of": "2026-09-30", "horizon_end": "2026-10-24", "payday": "2026-10-23", "income_assumption": "income on payday",
+ "start_balance": 1635.88,
+ "series": [{"date": "2026-09-30", "balance": 1635.88}, {"date": "2026-10-01", "balance": 1575.17}, "... one point per day ...",
+            {"date": "2026-10-23", "balance": 1671.39}, {"date": "2026-10-24", "balance": 1410.68}],
+ "lowest": {"date": "2026-10-22", "balance": -1117.9, "days_ahead": 22,
+            "cause": {"name": "KBC Beleggingsplan", "amount": 75.0, "date": "2026-10-20", "subcategory": "investment"}},
+ "first_below_zero": "2026-10-09",
+ "safe_to_spend_per_day": 0, "floor": 50, "typical_daily_spend": 48.49, "daily_essentials": 12.22,
+ "warning": true, "top_up": 1170, "top_up_from_savings": true,
+ "bills": [{"date": "2026-10-04", "amount": 963.93, "name": "J. Simon", "subcategory": "rent"}, "... 8 bills until payday ..."],
+ "adjusted_for_feedback": [],
+ "message": "Heads-up: you'd go below zero on Fri 9 Oct and reach −€1,118 on Thu 22 Oct, the day before payday. Your bills until payday already use up your balance. Move €1,170 from savings to keep spending as usual (≈ €48/day)."}
+```
+Marc (4): `"payday": null`, `"horizon_end": "2026-11-04"` (35 days, 36 points), `"income_assumption": "a quiet month's income, spread evenly"`, and `bills` includes his next social contribution (`"subcategory": "social_contributions"`, €604.75 on 20 Oct) that the recurring list misses. Lowest −€2,581.05 on 4 Nov (cause: his mortgage), `top_up: 2640`, message starts `"Heads-up (planned on a quiet month): ..."`.
+On-track example, Julien (2): `"warning": false, "top_up": null, "safe_to_spend_per_day": 86, "message": "You're on track: your lowest point is €1,524 on Thu 22 Oct. Safe to spend: €86/day until payday on Fri 23 Oct."`
+- `series`: end-of-day balance of the current account, one point per day from today to `horizon_end`. Fixed payday → until the day after payday; no fixed payday (irregular, student) → 35 days.
+- `safe_to_spend_per_day`: integer ≥ 0, the largest steady everyday spend that keeps the balance ≥ `floor` (€50) every day until payday. `0` means the bills alone already break the floor. Compare it with `typical_daily_spend`.
+- `warning`: the projection goes below zero somewhere. Then `top_up` = euros (rounded up to 10) that lift the lowest point back to the floor, and `top_up_from_savings` says whether savings cover it. The `message` then offers "Move €X from savings", otherwise "We can move a bill to after payday or spread it". No warning → `top_up: null`.
+- `lowest.cause` (the biggest bill in the 3 days up to the low point) and `first_below_zero` can be `null`. `first_below_zero` = today when the account is already overdrawn (Emma, Jens).
+- `adjusted_for_feedback` works like on `/plan`: rejecting `has_car` removes the fuel estimate from `daily_essentials`.
+
+#### GET /api/me/payday-sorter
+Lotte (1), trimmed:
+```json
+{"available": true, "payday": "2026-10-23", "income": 2850, "income_kind": "salary", "support_first": false,
+ "pots": [
+   {"id": "bills", "label": "Bills", "amount": 1458, "planned": 1458, "short": 0, "approvable": true, "items": ["J. Simon", "Ethias", "Scarlet", "..."]},
+   {"id": "everyday", "label": "Groceries & fuel", "amount": 413, "planned": 413, "short": 0, "approvable": false, "items": ["fuel", "groceries"]},
+   {"id": "yearly_bills", "label": "Yearly bills", "amount": 51, "planned": 51, "short": 0, "approvable": true,
+    "items": ["Liberale Mutualiteit (mutuality) €95 due 2027-01-26", "Ethias (home) €518 due 2027-06-14"]},
+   {"id": "car_upkeep", "label": "Car upkeep", "amount": 80, "planned": 80, "short": 0, "approvable": true, "items": ["maintenance & tyres ≈ €650/yr", "..."]},
+   {"id": "savings", "label": "Savings", "amount": 200, "planned": 200, "short": 0, "approvable": true, "items": []},
+   {"id": "free_to_spend", "label": "Free to spend", "amount": 648, "planned": 648, "short": 0, "approvable": false, "items": []}],
+ "shortfall": 0, "simulation": true, "mandate": null,
+ "message": "On Fri 23 Oct Kate would move €1,458 to Bills, €51 to Yearly bills, €80 to Car upkeep and €200 to Savings. €413 stays for groceries & fuel and €648 is free to spend. Simulation: in this prototype no money moves. For real, nothing would move without your approval, and you can stop it any time."}
+```
+- Pot order is fixed: `bills`, `everyday`, one pot per plan reserve (`yearly_bills`, `car_upkeep`, `pet_care`, ...), `savings`, `free_to_spend`. **Ids are stable** (never derived from amounts or positions), so use them as keys.
+- `approvable: false` (`everyday`, `free_to_spend`) = stays on the current account: show it, but without a toggle.
+- Pots are funded in order until the income runs out. `short` per pot and `shortfall` in total show the gap honestly. Marc: `payday: null`, message `"When your next invoice lands Kate would move €1,674 to Bills. ... Honestly: this plan is €388 short, ..."`, and `yearly_bills`, `car_upkeep`, `pet_care` get `amount: 0`. Jens (113): `support_first: true`, **no savings pot**, €387 short.
+- A correction changes the pots: Lotte rejecting `has_car` drops `car_upkeep` (free to spend €648 → €915), and Marc rejecting `pet` drops `pet_care`.
+- No regular income → `{"available": false, "payday": null, "pots": [], "shortfall": 0, "simulation": true, "mandate": null, "message": "We don't see a regular income yet, so there's no payday to sort."}` (no demo persona hits this).
+- `mandate` is `null` or the active one, with `next_run` recomputed from today's plan:
+```json
+"mandate": {"id": 34, "created_at": "2026-09-30T19:06:16+00:00", "status": "active",
+            "pots": [{"id": "bills", "label": "Bills", "amount": 1458}, {"id": "car_upkeep", "label": "Car upkeep", "amount": 80}],
+            "next_run": {"pots": [{"id": "bills", "label": "Bills", "amount": 1458}, {"id": "car_upkeep", "label": "Car upkeep", "amount": 80}],
+                         "message": "On Fri 23 Oct Kate will move €1,458 to Bills and €80 to Car upkeep. Simulation: in this prototype no money moves. ..."}}
+```
+
+#### POST /api/me/payday-sorter/approve
+```json
+// request: pot ids only (approvable: true)     // 200
+{"pots": ["bills", "car_upkeep"]}               {"mandate": {"id": 34, "created_at": "2026-09-30T19:06:16+00:00", "status": "active",
+                                                             "pots": [{"id": "bills", "label": "Bills", "amount": 1458},
+                                                                      {"id": "car_upkeep", "label": "Car upkeep", "amount": 80}]},
+                                                 "message": "On Fri 23 Oct Kate will move €1,458 to Bills and €80 to Car upkeep. Simulation: ...",
+                                                 "simulation": true}
+```
+- **Never send amounts.** The server recomputes them from its own proposal at approval time and ignores extra keys (`amounts`, ...). Duplicate ids are merged and pots are stored in proposal order.
+- A new approval supersedes the previous one: at most one active mandate per customer.
+- **422** (`detail` is an array): an unknown id → `{"loc": ["body", "pots", 1], "type": "value_error", "msg": "Unknown pot id"}`; `everyday` / `free_to_spend` → `"msg": "This pot stays on your current account"`; `[]` → `too_short`; objects instead of ids (`[{"id": "bills", "amount": 1}]`) → `string_type`; a missing `pots`, ids not matching `^[a-z0-9_]{1,40}$`, or more than 20. **409** when `available` is false. **429** after 10 POSTs/min.
+
+#### POST /api/me/payday-sorter/revoke (no body)
+```json
+{"revoked": 1, "mandate": null, "simulation": true, "message": "Stopped: Kate won't sort your payday any more."}
+```
+Nothing active → `"revoked": 0`, `"message": "There was no payday sorter to stop."`. Mandates persist in the local DB. To reset: `sqlite3 data/kbc_twin.db "DELETE FROM sorter_mandates WHERE customer_id=1"`.
+
+#### GET /api/me/self-employed
+Everyone except Marc gets `{"applicable": false}`, so hide the card. So does Marc after he rejects `employment`. Marc (4), trimmed:
+```json
+{"applicable": true, "as_of": "2026-09-30",
+ "basis": {"window_days": 90, "window_start": "2026-07-03", "invoice_count": 6, "invoices_total": 8692.62, "annualised_income": 35253,
+           "assumption": "Sole proprietor in main occupation; invoices treated as income before business costs."},
+ "set_aside": {"social_contributions_pct": 20.5, "income_tax_pct": 17.6, "total_pct": 38.1,
+               "per_1000_invoiced": {"social_contributions": 205, "income_tax": 176, "total": 381}},
+ "last_invoice": {"date": "2026-09-11", "amount": 1039.67, "counterparty": "BV Goossens", "social_contributions": 213, "income_tax": 183, "total": 396},
+ "social_contributions": {"rate_pct": 20.5, "estimated_yearly": 7227, "estimated_quarterly": 1807, "observed_quarterly": 604.75,
+                          "last_paid": "2026-07-20", "next_expected": "2026-10-20", "next_amount": 604.75, "legal_deadline": "2026-12-31",
+                          "gap_per_quarter": 1202, "note": "You pay €605 a quarter now. Provisional contributions are based on your income of three years ago ..."},
+ "tax_prepayments": {"rate_pct": 17.6, "estimated_yearly": 6222, "per_quarter": 1556, "next_deadline": "2026-10-12",
+                     "remaining_deadlines": ["2026-10-12", "2026-12-21"], "observed_this_year": [], "note": "Prepaying is optional for a sole proprietor ..."},
+ "vat": {"known": false, "note": "We can't tell from your transactions whether you're VAT-registered ..."},
+ "message": "From every invoice, set aside ≈ 38%: 20.5% for social contributions (next ≈ €605 around Tue 20 Oct) and ≈ 18% for tax prepayments (next deadline Mon 12 Oct). On your last invoice (€1,040) that's €396. Indicative, not tax advice.",
+ "disclaimer": "Indicative estimate from your incoming invoices, not tax advice. We can't see your business costs, so the real amounts are probably lower; check with your accountant.",
+ "sources": ["https://www.accountable.eu/nl-be/blog/sociale-bijdragen/", "..."]}
+```
+- Always show `disclaimer`. `vat.known` is always `false` (VAT is never guessed). `last_invoice` and the `social_contributions.next_*` fields can be `null`.
+- `sources` are plain URLs: render them as text or as plain `<a rel="noopener noreferrer">` links.
+
+#### GET /api/me/moments-plus
+Same shape and rules as `/api/me/moments` (max 2 `push`, `feed`, `held_back`, sorted by priority), plus:
+
+| `kind` | `priority` | `title` | When |
+|---|---|---|---|
+| `overdraft_warning` | 94 | `"Heads-up: your balance may dip below zero"` | The forecast has `warning: true`. `body` = the forecast `message` |
+| `self_employed_reserve` | 88 | `"Your tax & social-contribution envelope"` | The self-employed envelope applies (Marc). `body` = the envelope `message` |
+
+Both have `sales: false` and `topic: null`, so money stress never holds them back. Open the forecast screen / set-aside card from them, not `/experience`.
+```json
+{"push": [{"kind": "overdraft_warning", "priority": 94, "title": "Heads-up: your balance may dip below zero",
+           "body": "Heads-up: you'd go below zero on Fri 9 Oct and reach −€1,118 on Thu 22 Oct, ...", "topic": null, "sales": false},
+          {"kind": "salary_plan", "priority": 90, "title": "Your payday plan is ready", "body": "€2,850 arrives on Fri 23 Oct. ...", "topic": null, "sales": false}],
+ "feed": [{"kind": "new_car", "priority": 80, "title": "Congrats on the car!", "body": "...", "topic": "car_insurance", "sales": true}],
+ "held_back": []}
+```
+| Persona | `push` | `feed` / `held_back` |
+|---|---|---|
+| Lotte (1) | `overdraft_warning`, `salary_plan` | `new_car` (**moved from push to feed**: render the feed so the car → car_insurance path still works) |
+| Julien (2) | `salary_plan`, `new_baby` (unchanged) | – |
+| Emma (3) | `overdraft_warning`, `salary_plan` | `moved`, `new_job` |
+| Marc (4) | `overdraft_warning`, `salary_plan` ("A quiet month would be tight") | `self_employed_reserve` |
+| Jens (113) | `support`, `overdraft_warning` | `salary_plan`; held back: `moved` |
 
 ### Ops / advisor API: `/api/ops/*` (advisor channel, ops-role token only)
 **The frontend must not call these with a customer token** (they return 401, and ops tokens get 401 on `/api/me/*`). The ops dashboard at `/ops` already uses them. Every ops login and every customer an advisor lists or opens is written to `ops_audit(at, username, customer_id, action)`.
@@ -244,18 +380,21 @@ After a customer rejects a fact that shaped the plan, the plan is recomputed on 
 
 | Persona (id) | Story | What the UI shows |
 |---|---|---|
-| **Lotte** (1), 29, Gent, nl | Bought an €11,500 used petrol car on 13 Jun 2026 with savings. Insured at Ethias, no car reserve. Salary €2,850 (the 25th falls on a Sunday, so payday is 23 Oct) | Push: payday plan + "Congrats on the car!" → car_insurance highlights **Mini-omnium**. car_loan → second-hand loan. **Main demo persona** |
-| **Julien** (2), 34, Namur, fr | Baby born July 2026, diesel car, dog, KBC mortgage | Push: payday plan + "Welcome to your little one" → family highlights **Hospitalisation insurance**. Kate answers in French |
-| **Emma** (3), 23, Leuven, nl | Moved out of her student room in August, first salary at Deloitte in September | Push: payday plan + "Settled in?" → home highlights **Home insurance**. Feed: "New job, new plan". car_insurance stays generic (no car) |
-| **Marc** (4), 47, Antwerpen, nl | Self-employed, irregular income, EV, two kids | Push: **"A quiet month would be tight"** (negative free_to_spend). car_loan highlights **Green car loan**. The glass box says "dog", but the data planted a cat: a real live **"That's not me"** demo |
-| **Jens** (5, customer id **113**), 21, Gent, nl | **Money stress.** Student (≈ €782/month from student jobs and parents), moved into a €605/month rental in July 2026, in the red on 46 of the last 90 days, no buffer | Push: **"Let's get ahead of next month"** (support) + a payday plan that is €90/week short. `held_back` has the "Settled in?" home-insurance message (**we hold back sales and help first**). Every `/experience` block carries `support_first: true`. Log in with id 113 |
+| **Lotte** (1), 29, Gent, nl | Bought an €11,500 used petrol car on 13 Jun 2026 with savings. Insured at Ethias, no car reserve. Salary €2,850 (the 25th falls on a Sunday, so payday is 23 Oct) | Push: payday plan + "Congrats on the car!" → car_insurance highlights **Mini-omnium**. car_loan → second-hand loan. Foresight: moments-plus leads with the overdraft heads-up (−€1,118 on 22 Oct, move €1,170 from savings) and moves the car card to the feed; sorter with 4 movable pots. **Main demo persona** |
+| **Julien** (2), 34, Namur, fr | Baby born July 2026, diesel car, dog, KBC mortgage | Push: payday plan + "Welcome to your little one" → family highlights **Hospitalisation insurance**. Kate answers in French. Foresight: on track, €86/day safe to spend |
+| **Emma** (3), 23, Leuven, nl | Moved out of her student room in August, first salary at Deloitte in September | Push: payday plan + "Settled in?" → home highlights **Home insurance**. Feed: "New job, new plan". car_insurance stays generic (no car). Foresight: warns from day one (her synthetic current account starts at −€3,981) |
+| **Marc** (4), 47, Antwerpen, nl | Self-employed, irregular income, EV, two kids | Push: **"A quiet month would be tight"** (negative free_to_spend). car_loan highlights **Green car loan**. The glass box says "dog", but the data planted a cat: a real live **"That's not me"** demo (it also drops the `pet_care` sorter pot). Foresight: 35-day quiet-month forecast warns, sorter €388 short, **set-aside card ≈ 38% per invoice** |
+| **Jens** (5, customer id **113**), 21, Gent, nl | **Money stress.** Student (≈ €782/month from student jobs and parents), moved into a €605/month rental in July 2026, in the red on 46 of the last 90 days, no buffer | Push: **"Let's get ahead of next month"** (support) + a payday plan that is €90/week short. `held_back` has the "Settled in?" home-insurance message (**we hold back sales and help first**). Every `/experience` block carries `support_first: true`. Sorter: bills first, no savings pot. Log in with id 113 |
 
 a. **Login + persona picker.** Five cards (name, city, one-line story; Jens logs in with customer id 113) plus a password field. The user types the password, read locally from `data/demo_credentials.txt`, which must never be bundled or pre-filled. Then `POST /api/auth/login` and `GET /api/me` for the greeting.
-b. **App home (phone frame, ~390 px wide).** A big payday push card (`push[0]`, and `push[1]` if present), then the moments feed. Cards with a `topic` open screen (e).
+b. **App home (phone frame, ~390 px wide).** Load `GET /api/me/moments-plus`. A big push card (`push[0]`, and `push[1]` if present), then the moments feed. Cards with a `topic` open screen (e); `overdraft_warning` opens (g), `self_employed_reserve` opens (i). Put the safe-to-spend meter (g) on the home too.
 c. **Kate chat.** Load `GET /api/me/chat`, show `opener` as Kate's first bubble, then `history`. On send: an optimistic user bubble, a typing indicator and a disabled input until the answer arrives. Under the answer, show a small hint from `tools_used`: `payday_plan` → "Kate checked: your payday plan", `check_affordability` → "Kate checked: affordability", `spending_summary` → "Kate checked: your spending", `recommend_product` → "Kate checked: best fit for {topic}".
 d. **"What KBC knows about me" (glass box).** `GET /api/me/twin?with_evidence=true`. One card per fact: summary, a confidence bar, since, implications and expandable evidence transactions (date, counterparty, amount). Add **"That's right" / "That's not me"** buttons (feedback endpoint, optional note), then refetch. Style rejected facts as struck-through.
 e. **Product topic page (highlight-one).** `GET /api/experience/{topic}`: a highlight card with the reason and "Because we know: {because[].summary} ({confidence})", plus the alternatives collapsed. **Key demo moment:** a **website view side by side, anonymous (no header) vs logged-in (with token)** for the same topic.
 f. **Ops / advisor dashboard: it exists at `/ops`, so don't rebuild it.** It's served by the API (`dashboard/`, `api/ops.py`, `twin/population.py`) with its own advisor login (`python -m api.seed_ops`) and the `/api/ops/*` contract above. Just link to `/ops` from your UI if you want.
+g. **"Safe to spend until payday" meter + overdraft heads-up card** (`GET /api/me/forecast`). Meter: "€{safe_to_spend_per_day}/day until {payday}" (when `payday` is null: "for the next 35 days"), next to "you usually spend ≈ €{typical_daily_spend}". Add a small line chart of `series` with the zero line and the €50 `floor`, and mark `lowest`. When `warning` is true, put a heads-up card above it: the `message`, plus the top-up suggestion as a button, "Move €{top_up} from savings" when `top_up_from_savings`, else "Move or spread a bill". There is no top-up endpoint: the button only shows a simulated confirmation, because no money moves. When `safe_to_spend_per_day` is 0, show "€0/day" honestly with the card, not an empty meter. Demo: Lotte warns, Julien (2) is on track at €86/day.
+h. **Payday sorter approval** (`GET /api/me/payday-sorter`, then `POST .../approve` or `.../revoke`). One row per pot: label, amount, expandable `items`, and a toggle **only** where `approvable` (the other pots read "stays on your account"). Show `short` / `shortfall` honestly (Marc: "€388 short: bills come first"). Keep a fixed label on the screen: **"Simulation — nothing moves without your approval"**. Approve sends only the toggled ids, `{"pots": [...]}`, then shows the returned `message` and an "Active: Bills, Car upkeep · Stop" strip (Stop = revoke). On 422, show a generic message and refetch the proposal, because a correction can change the pots. When `available` is false, show the `message` without an approve button.
+i. **Marc's self-employed set-aside card** (`GET /api/me/self-employed`, hidden when `applicable` is false). A big "Set aside ≈ 38% of every invoice", a split bar for social contributions vs tax prepayments, "On your last invoice (€1,040 from BV Goossens): €396", the next dates (social contribution ≈ €605 around 20 Oct, tax prepayment deadline 12 Oct), `social_contributions.note` as the "why", `vat.note` and `sources` collapsed, and the `disclaimer` always visible.
 
 Topics bar: `GET /api/topics`. Keep one API client module shared by the app view and the web view.
 
@@ -305,3 +444,9 @@ export async function api(path, { method = "GET", body, auth = true } = {}) {
 - **Failed logins are rate-limited:** 5 per 5 min per IP and per customer id (successful logins don't count). A room of judges behind one NAT shares the per-IP budget, so mistyped passwords add up. Restarting the API resets the limiter.
 - **Tokens last 1 h**, with no refresh. Without `TWIN_SECRET` in `.env`, every API restart logs everyone out.
 - **`channel` has no effect** on the content (it is validated and echoed). Chat without `OPENAI_API_KEY`: GET 200 (opener/history), POST 503.
+- **The forecast is a projection, not a promise.** It uses today's current-account balance, the recurring bills on their dates, the salary on payday and the typical daily spend of the last 90 days. One-off costs and invoice timing are unknown. Label the chart "Projection".
+- **The plan and the forecast can disagree, by design.** The plan splits the *next* salary; the forecast follows the balance *until* that salary lands. Lotte's data dips before payday (€1,636 today, rent €964 on 4 Oct, ≈ €61/day of spending), so her forecast warns (−€1,118 on 22 Oct, €0/day safe to spend) while her plan still shows €151/week after payday. Show both. For an "on track" screen use Julien (2). Emma (3) and Jens (113) start below zero in the synthetic data, so they warn from day one.
+- **No fixed payday** (Marc: irregular, Jens: student): `payday: null`, a 35-day horizon and income spread evenly (Marc: a quiet month). Write "next 35 days", not "until payday".
+- **The payday sorter is a simulation.** Nothing moves; every response has `simulation: true`. Mandates are rows in the local `sorter_mandates` table, and an active mandate's amounts are recomputed from the current plan (`next_run`). Approve / revoke share 10 POSTs/min per customer.
+- **The self-employed envelope is indicative, not tax advice:** Belgian 2026 rates, gross invoices (business costs unknown), sole proprietor assumed, VAT never guessed. Among the demo personas only Marc gets it.
+- Payday-sorter pot `items` for reserves contain ISO dates ("Ethias (home) €518 due 2027-06-14"), just like `/plan` reserves. Foresight `message` / `body` texts use friendly dates.
