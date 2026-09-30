@@ -175,6 +175,7 @@ The generator is seeded, so everyone gets the same customers and transactions. P
 
 - [`AGENTS.md`](AGENTS.md) — repo map, full API contract and screens for the frontend (read first)
 - [`docs/EXECUTIVE_SUMMARY.md`](docs/EXECUTIVE_SUMMARY.md) — one-page summary
+- [`docs/SCALABILITY.md`](docs/SCALABILITY.md) — scalability for 2.3M customers: initial build, daily update, cost (details in `docs/scalability/`)
 - [`docs/KBC_SERVICE_MAP.md`](docs/KBC_SERVICE_MAP.md) — where the twin fits in KBC's services, with sources
 - [`docs/KBC_VALUE_MATRIX.md`](docs/KBC_VALUE_MATRIX.md) — product-value matrix, guardrails, proof points
 - [`docs/PRIVATE_BANKER_AT_SCALE.md`](docs/PRIVATE_BANKER_AT_SCALE.md) — business case: private-banker quality at retail scale
@@ -192,7 +193,7 @@ The generator is seeded, so everyone gets the same customers and transactions. P
 - [x] Ops & advisor dashboard for the 5K population (`/ops`, separate ops login, every customer access audited)
 - [x] Money-stress demo persona (5, Jens): sales held back, support first
 - [x] Money foresight: overdraft early warning, payday sorter (approve-to-act, simulated), self-employed reserve
-- [x] Test suite: 492 tests, all passing (`python -m pytest -q`)
+- [x] Test suite: 513 tests, all passing (`python -m pytest -q`)
 - [x] App + website frontends (`web/`): customer login, payday plan, safe-to-spend forecast, approval-only payday sorter, product comparison, glass box with fact correction, Kate and support-first state
 - [ ] Aikido scan before/after, demo video
 

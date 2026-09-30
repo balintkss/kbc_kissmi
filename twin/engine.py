@@ -46,12 +46,16 @@ def _since(ts):
     return "before " + WINDOW_START.date().isoformat() if ts < WINDOW_START + pd.Timedelta(days=45) else _d(ts)
 
 
-def _is_recent(ts, days=120):
-    return ts is not None and not pd.isna(ts) and ts >= WINDOW_START + pd.Timedelta(days=45) and (AS_OF - ts).days <= days
+def _is_recent(ts, days=120, as_of=None):
+    as_of = AS_OF if as_of is None else as_of
+    return ts is not None and not pd.isna(ts) and ts >= WINDOW_START + pd.Timedelta(days=45) and (as_of - ts).days <= days
 
 
 class Twin:
-    def __init__(self, customer, tx, products, accounts):
+    def __init__(self, customer, tx, products, accounts, as_of=None):
+        """as_of: the day the twin is built for (default AS_OF). The caller passes only transactions booked on or
+        before it and the balances of that day (twin/incremental.py does this for the daily update)."""
+        self.as_of = AS_OF if as_of is None else pd.Timestamp(as_of)
         self.c = customer
         self.tx = tx
         self.cur = tx[tx.acc_type == "current"]
@@ -92,7 +96,7 @@ class Twin:
             return
         for sub_, kind, label in (("pension", "retired", "Pension"), ("benefit", "unemployed", "Unemployment benefit")):
             s = self.sub(sub_)
-            if len(s) >= 2 and (AS_OF - s.booked_at.max()).days < 45:
+            if len(s) >= 2 and (self.as_of - s.booked_at.max()).days < 45:
                 amount = float(s.tail(3).amount.median())
                 self.add("employment", kind, 0.95, _since(s.booked_at.min()), _ev(s), f"{label} ≈ €{amount:,.0f}/month")
                 self.add("income", round(amount), 0.95, None, _ev(s), f"{label} ≈ €{amount:,.0f}/month",
@@ -131,7 +135,7 @@ class Twin:
         first = other["purchase"].booked_at.min() if len(other["purchase"]) else energy.booked_at.min()
         evidence = _ev(pd.concat([energy.tail(3), *[v.tail(1) for v in other.values() if len(v)]]), 8)
 
-        months_seen = max(1, (AS_OF - max(first, WINDOW_START)).days / 30.4)
+        months_seen = max(1, (self.as_of - max(first, WINDOW_START)).days / 30.4)
         fuel_month = -energy.amount.sum() / months_seen
         ins = other["insurance"]
         if "car_insurance" in self.products:
@@ -143,7 +147,7 @@ class Twin:
         else:
             insured_at, ins_year = None, None
         older = len(other["inspection"]) > 0
-        bought_recently = _is_recent(other["purchase"].booked_at.min() if len(other["purchase"]) else None, 200)
+        bought_recently = _is_recent(other["purchase"].booked_at.min() if len(other["purchase"]) else None, 200, self.as_of)
         price = -other["purchase"].amount.sum() if len(other["purchase"]) else None
         maint_obs = -other["maintenance"].amount.sum()
         maint_year = max(maint_obs, MAINTENANCE_DEFAULT[powertrain] * (1.3 if older else 1))
@@ -207,10 +211,10 @@ class Twin:
     def infer_housing(self):
         rent, mort = self.sub("rent"), self.sub("mortgage")
         ptax, energy = self.sub("property_tax"), self.sub("energy")
-        if len(mort) and (AS_OF - mort.booked_at.max()).days < 45:
+        if len(mort) and (self.as_of - mort.booked_at.max()).days < 45:
             self.add("housing", "owner_with_mortgage", 0.97, None, _ev(mort), f"Mortgage repayment €{-mort.amount.iloc[-1]:,.0f}/month",
                      monthly=round(-mort.amount.iloc[-1]), home_loan_at_kbc="home_loan" in self.products)
-        elif len(rent) and (AS_OF - rent.booked_at.max()).days < 45:
+        elif len(rent) and (self.as_of - rent.booked_at.max()).days < 45:
             student = -rent.amount.iloc[-1] < 600 and not len(energy[energy.booked_at >= rent.booked_at.max() - pd.Timedelta(days=60)])
             self.add("housing", "student_room" if student else "renting", 0.95, None, _ev(rent),
                      f"Rent €{-rent.amount.iloc[-1]:,.0f}/month to {rent.iloc[-1].counterparty}", monthly=round(-rent.amount.iloc[-1]))
@@ -236,7 +240,7 @@ class Twin:
             self.add("gym_member", gym.iloc[-1].counterparty, 0.95, _since(gym.booked_at.min()), _ev(gym), f"{gym.iloc[-1].counterparty} membership")
         subs = self.sub("streaming")
         if len(subs):
-            names = sorted(set(subs[subs.booked_at >= AS_OF - pd.Timedelta(days=45)].counterparty))
+            names = sorted(set(subs[subs.booked_at >= self.as_of - pd.Timedelta(days=45)].counterparty))
             monthly = sum(-subs[subs.counterparty == n].amount.iloc[-1] for n in names)
             if names:
                 self.add("subscriptions", names, 0.95, None, _ev(subs), f"{len(names)} subscriptions, €{monthly:.2f}/month", monthly=round(monthly, 2))
@@ -249,7 +253,7 @@ class Twin:
         savings = self.accounts.get("savings", 0.0)
         current = self.accounts.get("current", 0.0)
         out = self.cur[(self.cur.amount < 0) & (self.cur.channel != "internal_transfer")]
-        monthly_out = -out[out.booked_at >= AS_OF - pd.Timedelta(days=90)].amount.sum() / 3
+        monthly_out = -out[out.booked_at >= self.as_of - pd.Timedelta(days=90)].amount.sum() / 3
         buffer_months = (savings + max(current, 0)) / monthly_out if monthly_out else 0
         if len(sav_tx):
             self.add("saves_monthly", round(-sav_tx.tail(3).amount.mean()), 0.95, _since(sav_tx.booked_at.min()), _ev(sav_tx),
@@ -257,7 +261,7 @@ class Twin:
         self.add("financial_buffer", round(float(buffer_months), 1), 0.9, None, [],
                  f"Savings + current account cover {buffer_months:.1f} months of spending",
                  savings=round(savings), current=round(current), monthly_spending=round(monthly_out))
-        recent = self.cur[self.cur.booked_at >= AS_OF - pd.Timedelta(days=90)]
+        recent = self.cur[self.cur.booked_at >= self.as_of - pd.Timedelta(days=90)]
         neg_days = recent[recent.balance_after < 0].booked_at.dt.date.nunique()
         inc = recent[(recent.amount > 0) & (recent.channel != "internal_transfer")].amount.sum()
         spend = -recent[(recent.amount < 0) & (recent.channel != "internal_transfer")].amount.sum()
@@ -273,7 +277,7 @@ class Twin:
         for (cp, sub), g in out.groupby(["counterparty", "subcategory"]):
             months = g.booked_at.dt.to_period("M").nunique()
             last = g.booked_at.max()
-            if (AS_OF - last).days > 70:
+            if (self.as_of - last).days > 70:
                 continue  # stopped (e.g. old rent after a move)
             recent = g.tail(3)
             amount = float(-recent.amount.median())
@@ -287,7 +291,7 @@ class Twin:
                                       amount=round(amount, 2), next_date=_d(nxt), monthly_equivalent=round(amount / 3, 2)))
                 else:
                     day = int(recent.booked_at.dt.day.median())
-                    nxt = (AS_OF + pd.offsets.MonthBegin(1)).replace(day=min(day, 28))
+                    nxt = (self.as_of + pd.offsets.MonthBegin(1)).replace(day=min(day, 28))
                     items.append(dict(name=cp, subcategory=sub, category=g.iloc[-1].category, frequency="monthly",
                                       amount=round(amount, 2), day_of_month=day, next_date=_d(nxt), monthly_equivalent=round(amount, 2)))
         # housing: only the current home counts, even if it has been paid just once since a move
@@ -295,11 +299,11 @@ class Twin:
         if len(home):
             latest = home.iloc[-1]
             items = [i for i in items if i["subcategory"] not in ("rent", "mortgage") or i["name"] == latest.counterparty]
-            if not any(i["name"] == latest.counterparty for i in items) and (AS_OF - latest.booked_at).days <= 40:
+            if not any(i["name"] == latest.counterparty for i in items) and (self.as_of - latest.booked_at).days <= 40:
                 day = int(latest.booked_at.day)
                 items.append(dict(name=latest.counterparty, subcategory=latest.subcategory, category="housing", frequency="monthly",
                                   amount=round(-latest.amount, 2), day_of_month=day,
-                                  next_date=_d((AS_OF + pd.offsets.MonthBegin(1)).replace(day=min(day, 28))),
+                                  next_date=_d((self.as_of + pd.offsets.MonthBegin(1)).replace(day=min(day, 28))),
                                   monthly_equivalent=round(-latest.amount, 2)))
         yearly = out[out.subcategory.isin(YEARLY_SUBS) | out.description.str.contains("jaarpremie|prime annuelle|annual premium", case=False)]
         for _, row in yearly.iterrows():
@@ -317,7 +321,7 @@ class Twin:
         irregular = inc.get("kind") == "irregular"
         income = inc.get("quiet_month", inc["value"]) if irregular else inc["value"]
         payday = inc.get("payday") or 1
-        pay_date = (AS_OF + pd.offsets.MonthBegin(1)).replace(day=min(payday, 28))
+        pay_date = (self.as_of + pd.offsets.MonthBegin(1)).replace(day=min(payday, 28))
         if pay_date.weekday() >= 5:
             pay_date -= pd.Timedelta(days=pay_date.weekday() - 4)
         next_pay = pay_date + pd.DateOffset(months=1)
@@ -336,7 +340,7 @@ class Twin:
         if car:
             fuel = next((i["monthly"] for i in car["implies"] if i["cost"] in ("fuel", "charging")), 0)
             variable.append(dict(name="fuel" if car["powertrain"] == "combustion" else "charging", amount=fuel, estimated=True))
-        groceries = self.cur[(self.cur.category == "groceries") & (self.cur.booked_at >= AS_OF - pd.Timedelta(days=90))]
+        groceries = self.cur[(self.cur.category == "groceries") & (self.cur.booked_at >= self.as_of - pd.Timedelta(days=90))]
         variable.append(dict(name="groceries", amount=round(-groceries.amount.sum() / 3), estimated=True))
         savings = self.facts.get("saves_monthly", {}).get("value", 0)
         big_soon = [r for r in recurring if r["frequency"] == "yearly" and pd.Timestamp(r["next_date"]) <= next_pay + pd.Timedelta(days=30)]
@@ -357,8 +361,8 @@ class Twin:
         c = self.c
         return dict(
             customer_id=int(c.customer_id), name=f"{c.first_name} {c.last_name}", first_name=c.first_name,
-            language=c.language, region=c.region, city=c.city, age=int(AS_OF.year - c.birth_year),
-            kbc_products=sorted(self.products), facts=self.facts, recurring=rec, plan=self.plan(rec), as_of=_d(AS_OF),
+            language=c.language, region=c.region, city=c.city, age=int(self.as_of.year - c.birth_year),
+            kbc_products=sorted(self.products), facts=self.facts, recurring=rec, plan=self.plan(rec), as_of=_d(self.as_of),
         )
 
 
