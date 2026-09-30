@@ -284,3 +284,10 @@ app.include_router(ops_pages)    # /ops dashboard (static, same origin)
 from api.routes_foresight import router as foresight_router  # noqa: E402  (customer token only)
 
 app.include_router(foresight_router)  # /api/me/forecast, /api/me/payday-sorter*, /api/me/self-employed, /api/me/moments-plus
+
+
+# ---------------------------------------------------------------------- life moments & gaps (api/routes_life.py)
+
+from api.routes_life import router as life_router  # noqa: E402  (customer token only)
+
+app.include_router(life_router)  # /api/me/life-checklists, /api/me/coverage-gaps, /api/me/benefits

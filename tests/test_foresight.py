@@ -534,9 +534,17 @@ def test_moments_with_foresight_extras(app, login, ro_con, twin_of):
     for m in marc_extra.values():
         _no_iso(m["body"])
 
-    # the API: moments-plus = moments + extras; the existing /api/me/moments is untouched
+    # the API: moments-plus = moments + foresight extras + life moments (a life checklist replaces the
+    # single-event message about the same event); the existing /api/me/moments is untouched
     h = login(LOTTE)
-    assert app.get("/api/me/moments-plus", headers=h).json() == plus
+    got = app.get("/api/me/moments-plus", headers=h).json()
+    got_kinds = [x["kind"] for x in got["push"] + got["feed"]]
+    assert got["push"][:1] == plus["push"][:1] and len(got["push"]) <= 2
+    assert {m["kind"] for m in extra} <= set(got_kinds) and "life_checklist" in got_kinds
+    assert "new_car" not in got_kinds  # Lotte's new-car checklist covers the "Congrats on the car" message
+    assert got["held_back"] == plus["held_back"]
+    got_prios = [x["priority"] for x in got["push"] + got["feed"]]
+    assert got_prios == sorted(got_prios, reverse=True)
     assert app.get("/api/me/moments", headers=h).json() == plain
 
 

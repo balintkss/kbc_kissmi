@@ -6,7 +6,9 @@
                                         here; unknown / non-movable ids -> 422
   POST /api/me/payday-sorter/revoke     stop the active mandate
   GET  /api/me/self-employed            reserve envelope, or {"applicable": false} (twin/selfemployed.py)
-  GET  /api/me/moments-plus             /api/me/moments plus the foresight moments (overdraft_warning, self_employed_reserve)
+  GET  /api/me/moments-plus             /api/me/moments + foresight moments (overdraft_warning, self_employed_reserve)
+                                        + life moments (life_checklist, coverage_gap, benefit_hint, turning_25,
+                                        household_change_prompt); a checklist replaces the single-event message
 
 Identity comes only from the customer token (api.main.current_customer): no customer id in any path, query or body.
 POSTs are lightly rate-limited per customer. api.main mounts this router at its bottom, so everything from
@@ -101,7 +103,23 @@ def my_self_employed(cid=Depends(_customer), con=Depends(_db)):
     return selfemployed.envelope(con, cid, _twin(con, cid))
 
 
+# A life-moment checklist replaces the older single-event message about the same event.
+_COVERED_BY_CHECKLIST = {"moved": {"moved"}, "new_car": {"new_car"}, "new_job": {"first_job", "new_job"},
+                         "new_baby": {"new_baby"}}
+
+
 @router.get("/moments-plus")
 def my_moments_plus(cid=Depends(_customer), con=Depends(_db)):
+    """Moments + foresight (overdraft, self-employed reserve) + life moments (checklists, gaps, benefits)."""
+    from twin.checklists import checklists, life_moments  # lazy: keeps this router importable on its own
+
     twin = _twin(con, cid)
-    return moments(twin, extra=foresight_moments(con, cid, twin))
+    events = {c.get("event") for c in checklists(con, cid, twin)}
+    drop = {kind for kind, evs in _COVERED_BY_CHECKLIST.items() if evs & events}
+    result = moments(twin, extra=foresight_moments(con, cid, twin) + life_moments(con, cid, twin))
+    if not drop:
+        return result
+    ranked = sorted((m for m in result["push"] + result["feed"] if m["kind"] not in drop), key=lambda m: -m["priority"])
+    n_push = len(result["push"])
+    # held_back stays complete: it is the evidence of what KBC deliberately did not send
+    return dict(result, push=ranked[:n_push], feed=ranked[n_push:])
