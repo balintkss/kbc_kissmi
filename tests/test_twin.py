@@ -12,12 +12,13 @@ from pathlib import Path
 import pytest
 
 from twin.catalog import CATALOG
-from twin.recommender import moments, page
+from twin.recommender import CREDIT_VARIANTS, NO_ROOM, _affordable_loan, _nice_date, moments, page
 
 pytestmark = pytest.mark.needs_db
 
 ROOT = Path(__file__).resolve().parent.parent
 LOTTE, JULIEN, EMMA, MARC = 1, 2, 3, 4
+ISO_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 
 @pytest.fixture(scope="module")
@@ -138,20 +139,46 @@ def test_every_personalized_highlight_is_a_catalog_variant(profiles):
                 continue
             personalized += 1
             hl = block["highlight"]
-            assert hl["id"] in cat["variants"], (cid, topic, hl["id"])
+            if hl["id"] == "support":  # money stress, credit topic: a "payday plan first" card, every loan collapsed
+                assert block.get("support_first") is True and topic == "car_loan", (cid, topic)
+                assert hl["name"] and hl["summary"] and hl["features"], cid
+            else:
+                assert hl["id"] in cat["variants"], (cid, topic, hl["id"])
             assert isinstance(hl["reason"], str), (cid, topic)
             assert {b["key"] for b in hl["because"]} <= set(t["facts"]), (cid, topic)
             assert sorted(a["id"] for a in block["alternatives"]) == sorted(set(cat["variants"]) - {hl["id"]}), (cid, topic)
     assert personalized > len(profiles) * 3
 
 
-@pytest.mark.xfail(strict=False, reason="BUG: _pick_car_loan falls through to 'new_car_loan' with an empty reason when "
-                                        "_affordable_loan() is None (free_to_spend <= 0): ~150 twins with no room in "
-                                        "their budget, most under money stress, get the priciest loan highlighted, unexplained")
 def test_every_personalized_highlight_explains_itself(profiles):
+    """Regression: with no room in the budget, _pick_car_loan used to fall through to 'new_car_loan' with an empty reason."""
     unexplained = [(cid, topic, block["highlight"]["id"]) for cid, t in profiles.items() for topic in CATALOG
                    for block in [page(t, topic)] if block["personalized"] and not block["highlight"]["reason"].strip()]
     assert unexplained == []
+
+
+def test_car_loan_with_no_budget_room_highlights_the_cheapest_loan_honestly(profiles):
+    """free_to_spend <= 0 and no car-specific reason: the smallest (second-hand) loan, never 'new car', with an honest reason."""
+    no_room = {cid: t for cid, t in profiles.items() if _affordable_loan(t) is None and not t["facts"].get("money_stress")}
+    assert len(no_room) > 100
+    fall_through = 0
+    for cid, t in no_room.items():
+        hl = page(t, "car_loan")["highlight"]
+        assert hl["id"] != "new_car_loan", cid
+        assert "comfortably" not in hl["reason"], cid  # no promise the budget can't keep
+        if hl["id"] == "used_car_loan" and "has_car" not in t["facts"]:
+            fall_through += 1
+            assert hl["reason"] == NO_ROOM, cid
+    assert fall_through > 50
+
+
+def test_car_loan_no_room_reason_for_a_single_twin(persona):
+    t = persona(EMMA)
+    t["facts"].pop("has_car", None)
+    t["plan"]["free_to_spend"] = -120
+    hl = page(t, "car_loan")["highlight"]
+    assert hl["id"] == "used_car_loan" and hl["reason"] == NO_ROOM
+    assert "no room" in hl["reason"] and "payday plan" in hl["reason"]
 
 
 def test_rejected_car_stops_driving_car_pages_and_moments(persona):
@@ -161,23 +188,152 @@ def test_rejected_car_stops_driving_car_pages_and_moments(persona):
     assert "new_car" not in kinds and "salary_plan" in kinds
 
 
-@pytest.mark.xfail(strict=False, raises=TypeError,
-                   reason="BUG: _pick_savings uses buffer['value'] when the customer rejected financial_buffer "
-                          "(buffer is None) -> TypeError; reachable as HTTP 500 on /api/experience/savings")
 def test_rejected_financial_buffer_does_not_crash_savings_page(persona):
+    """Regression: _pick_savings formatted buffer['value'] after the customer rejected financial_buffer -> TypeError."""
     block = page(reject(persona(MARC), "financial_buffer"), "savings")
-    assert block["topic"] == "savings"
+    assert block["topic"] == "savings" and block["personalized"]
+    hl = block["highlight"]
+    assert hl["id"] == "savings_account" and hl["reason"].strip()  # buffer unknown: build the base, no investment pitch
+    assert "financial_buffer" not in {b["key"] for b in hl["because"]}
 
 
-@pytest.mark.xfail(strict=False, reason="BUG: page() builds `because` from the picker's fact keys without skipping "
-                                        "rejected facts, so a highlight still cites a fact the customer said is wrong "
-                                        "(e.g. Lotte rejects housing -> home page is still 'because' housing)")
 def test_highlight_never_cites_a_rejected_fact(persona):
+    """Regression: page() built `because` from the picker's keys without skipping rejected facts."""
     for cid, key, topic in ((LOTTE, "housing", "home"), (LOTTE, "financial_buffer", "savings"),
                             (JULIEN, "income", "car_loan")):
         block = page(reject(persona(cid), key), topic)
         cited = {b["key"] for b in (block["highlight"] or {}).get("because", [])}
         assert key not in cited, (cid, key, topic)
+        assert block["highlight"]["reason"].strip(), (cid, key, topic)  # still highlighted, still explained
+
+
+@pytest.mark.parametrize("cid", [LOTTE, JULIEN, EMMA, MARC])
+def test_any_single_rejected_fact_is_tolerated_everywhere(persona, cid):
+    """Every fact the twin has, rejected on its own: every picker and moments() keep working, never cite it."""
+    for key in list(persona(cid)["facts"]):
+        t = reject(persona(cid), key)
+        for topic in CATALOG:
+            block = page(t, topic)
+            if block["personalized"]:
+                assert block["highlight"]["reason"].strip(), (cid, key, topic)
+                assert key not in {b["key"] for b in block["highlight"]["because"]}, (cid, key, topic)
+        m = moments(t)
+        assert all(x["body"].strip() for part in m.values() for x in part), (cid, key)
+
+
+@pytest.mark.parametrize("cid", [LOTTE, JULIEN, EMMA, MARC])
+def test_every_fact_rejected_at_once_is_tolerated(persona, cid):
+    t = persona(cid)
+    for key in list(t["facts"]):
+        reject(t, key)
+    for topic in CATALOG:
+        block = page(t, topic)
+        if block["personalized"]:
+            assert block["highlight"]["reason"].strip() and block["highlight"]["because"] == [], (cid, topic)
+    assert moments(t)["held_back"] == []
+
+
+def test_bare_twin_without_facts_or_plan_is_tolerated():
+    bare = dict(facts={}, plan=None, recurring=[], kbc_products=[], age=None)
+    for topic in CATALOG:
+        block = page(bare, topic)
+        assert block["topic"] == topic
+        if block["personalized"]:
+            assert block["highlight"]["reason"].strip() and block["highlight"]["because"] == [], topic
+    assert moments(bare) == dict(push=[], feed=[], held_back=[])
+
+
+# ====================================================================== money stress: support first on product pages
+
+def test_money_stress_makes_every_page_support_first(persona):
+    for cid in (LOTTE, JULIEN, EMMA, MARC):
+        calm, stressed = persona(cid), with_money_stress(persona(cid))
+        for topic in CATALOG:
+            assert "support_first" not in page(calm, topic), (cid, topic)
+            block = page(stressed, topic)
+            assert block["support_first"] is True, (cid, topic)
+            if block["personalized"]:
+                hl = block["highlight"]
+                assert hl["id"] not in CREDIT_VARIANTS, (cid, topic, hl["id"])
+                assert hl["reason"].strip(), (cid, topic)
+                assert "quote in 2 minutes" not in hl["reason"] and "comfortably" not in hl["reason"], (cid, topic)
+                assert "money_stress" in {b["key"] for b in hl["because"]}, (cid, topic)
+
+
+def test_money_stress_car_loan_shows_no_loan(persona):
+    block = page(with_money_stress(persona(LOTTE)), "car_loan")
+    assert block["personalized"] is True and block["support_first"] is True
+    hl = block["highlight"]
+    assert hl["id"] == "support" and hl["id"] not in CATALOG["car_loan"]["variants"]
+    assert hl["reason"].startswith("Let's first get your payday plan back in balance")
+    assert {a["id"] for a in block["alternatives"]} == set(CATALOG["car_loan"]["variants"])  # all loans, collapsed
+
+
+def test_money_stress_home_and_savings_never_sell_credit_or_investing(persona):
+    for cid in (LOTTE, JULIEN, EMMA, MARC):
+        t = with_money_stress(persona(cid))
+        assert page(t, "home")["highlight"]["id"] == "home_insurance", cid
+        assert page(t, "savings")["highlight"]["id"] == "savings_account", cid
+        car_ins = page(t, "car_insurance")
+        assert not car_ins["personalized"] or car_ins["highlight"]["id"] != "omnium", cid
+
+
+def test_rejected_money_stress_is_not_support_first(persona):
+    t = reject(with_money_stress(persona(LOTTE)), "money_stress")
+    assert page(t, "car_loan") == page(persona(LOTTE), "car_loan")
+    assert page(None, "car_loan").get("support_first") is None  # anonymous visitors: nothing to flag
+
+
+def test_no_stressed_twin_is_ever_offered_credit(profiles):
+    stressed = 0
+    for cid, t in profiles.items():
+        is_stressed = bool(t["facts"].get("money_stress")) and not t["facts"]["money_stress"].get("rejected_by_customer")
+        stressed += is_stressed
+        for topic in CATALOG:
+            block = page(t, topic)
+            assert block.get("support_first", False) is is_stressed, (cid, topic)
+            if is_stressed and block["personalized"]:
+                assert block["highlight"]["id"] not in CREDIT_VARIANTS | {"pension_savings", "investment_plan", "omnium"}, (cid, topic)
+    assert stressed > 100
+
+
+# ====================================================================== friendly dates in customer-facing text
+
+@pytest.mark.parametrize("raw,nice", [
+    ("2026-10-23", "Fri 23 Oct"),            # upcoming (payday): weekday, no year
+    ("2026-09-30", "Wed 30 Sep"),            # today counts as upcoming
+    ("2027-01-05", "Tue 5 Jan 2027"),        # upcoming, but next year
+    ("2026-06-13", "13 Jun 2026"),           # past: day month year
+    ("before 2025-10-01", "before 1 Oct 2025"),
+    ("Ethias €518 expected 2026-11-02", "Ethias €518 expected Mon 2 Nov"),
+    ("2026-13-45", "2026-13-45"),            # not a real date: left alone
+    ("Deloitte Belgium", "Deloitte Belgium"),
+    (None, ""),
+    (date(2026, 10, 23), "Fri 23 Oct"),
+])
+def test_nice_date(raw, nice):
+    assert _nice_date(raw) == nice
+
+
+def test_demo_texts_use_friendly_dates(persona):
+    lotte = persona(LOTTE)
+    push = {m["kind"]: m for m in moments(lotte)["push"]}
+    assert push["salary_plan"]["body"].startswith("€2,850 arrives on Fri 23 Oct. Bills €1,458")
+    assert lotte["plan"]["payday"] == "2026-10-23"  # the structured field stays ISO
+    assert "You bought your car on 13 Jun 2026 with your own savings" in page(lotte, "car_loan")["highlight"]["reason"]
+    assert "(born around 21 Jul 2026)" in page(persona(JULIEN), "family")["highlight"]["reason"]
+    assert page(persona(EMMA), "home")["highlight"]["reason"].startswith("You moved on 18 Aug 2026:")
+
+
+def test_customer_facing_text_never_shows_iso_dates(profiles):
+    for cid, t in profiles.items():
+        m = moments(t)
+        texts = [x[k] for part in m.values() for x in part for k in ("title", "body")]
+        for topic in CATALOG:
+            hl = page(t, topic)["highlight"]
+            if hl:
+                texts += [hl["reason"], *(b["summary"] for b in hl["because"])]
+        assert not [x for x in texts if ISO_DATE.search(x)], cid
 
 
 # ====================================================================== moments

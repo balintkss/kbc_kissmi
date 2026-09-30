@@ -25,6 +25,7 @@ Owner: **A** = backend/Claude side, **B** = frontend teammate, **Both** = check 
 - [ ] **Revoke the OpenAI key after the hackathon** (it was shared in a chat transcript) — A
 - [ ] No GCP credentials (they're personal and valid 1 week) in any file, screenshot or video — Both
 - [ ] Demo video and screenshots don't show demo passwords, tokens, or your terminal with env vars — Both
+- [ ] Ops password: rotate it with `.venv/bin/python -m api.seed_ops` before recording and **never show `data/ops_credentials.txt` on screen** (same for `data/demo_credentials.txt`) — Both
 - [ ] All customer data is synthetic — say so in README and video (already in README) — Both
 
 ## 3. Aikido security audit (10% of the score)
@@ -43,7 +44,8 @@ Owner: **A** = backend/Claude side, **B** = frontend teammate, **Both** = check 
 - [ ] **Fresh clone test** on the teammate's laptop, following only the README "Run it" section, start to finish — B
 - [ ] `requirements.txt` complete (fastapi, uvicorn, pandas, httpx, + LLM SDK once added) — A
 - [ ] `python -m twin.evaluate` output matches the numbers in the README — A
-- [ ] Demo personas 1–4 each log in and show a sensible highlight, plan and push — Both
+- [ ] Demo personas 1–4 and 5 (Jens, customer id 113) each log in and show a sensible highlight, plan and push; Jens shows the support push and a held-back sales message — Both
+- [ ] `.venv/bin/python -m pytest -q` is green (no real OpenAI calls; needs `requirements-dev.txt`) — A
 - [ ] Anonymous vs. logged-in page difference is visible in the demo — B
 - [ ] Customer correction ("that's not me") works in the UI — B
 - [ ] Chat (pull) answers in the customer's language and uses twin context — A
@@ -61,6 +63,7 @@ Owner: **A** = backend/Claude side, **B** = frontend teammate, **Both** = check 
 
 ## 6. Demo video (< 3 minutes)
 
+- [ ] **Before recording: restart the API** (fresh rate-limit counters, latest code) **and run `.venv/bin/python -m pytest -q`** — A
 - [ ] **Under 3:00** — check the actual file length — Both
 - [ ] Story: problem → Lotte's twin (car from fuel purchases) → payday push → one highlighted product with the reason → anonymous vs logged-in → the pull chat → scale (5K twins in 80 s, accuracy table, 2.3M story) — Both
 - [ ] Shows the real running product, not only slides — Both

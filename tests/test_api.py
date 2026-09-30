@@ -154,8 +154,6 @@ def test_login_body_that_is_not_json_is_422(client):
     assert r.status_code == 422
 
 
-@pytest.mark.xfail(strict=False, reason="BUG: customer_id >= 2**63 passes validation (only gt=0) and makes sqlite "
-                                        "raise OverflowError -> unhandled HTTP 500 instead of 401/422")
 @pytest.mark.parametrize("customer_id", [2 ** 63, 10 ** 30])
 def test_huge_customer_id_is_rejected_cleanly(make_client, customer_id):
     c = make_client(raise_server_exceptions=False)
@@ -562,13 +560,50 @@ def test_malformed_feedback_is_422(client, login, ro_con, body):
     assert _feedback_rows(ro_con, 1) == before
 
 
-@pytest.mark.xfail(strict=False, reason="BUG: twin/recommender.py _pick_savings formats buffer['value'] after the "
-                                        "customer rejected financial_buffer (buffer is None) -> TypeError -> HTTP 500")
 def test_rejecting_financial_buffer_keeps_savings_page_working(make_client, login):
-    h = login(4)  # Marc: already has pension savings, so the picker falls through to the investment_plan branch
+    """Regression: _pick_savings formatted buffer['value'] after the customer rejected financial_buffer -> HTTP 500."""
+    h = login(4)  # Marc: already has pension savings, so the picker used to fall through to the investment_plan branch
     c = make_client(raise_server_exceptions=False)
     assert c.post("/api/me/facts/financial_buffer/feedback", json={"correct": False}, headers=h).status_code == 200
-    assert c.get("/api/experience/savings", headers=h).status_code == 200
+    r = c.get("/api/experience/savings", headers=h)
+    assert r.status_code == 200
+    hl = r.json()["highlight"]
+    assert hl["reason"] and "financial_buffer" not in {b["key"] for b in hl["because"]}
+
+
+@pytest.mark.parametrize("cid", [1, 2, 3, 4])
+def test_rejecting_any_fact_keeps_every_page_working(make_client, login, cid):
+    h = login(cid)
+    c = make_client(raise_server_exceptions=False)
+    for fact in [f["key"] for f in c.get("/api/me/twin", headers=h).json()["facts"]]:
+        assert c.post(f"/api/me/facts/{fact}/feedback", json={"correct": False}, headers=h).status_code == 200, fact
+    for topic in CATALOG:
+        r = c.get(f"/api/experience/{topic}", headers=h)
+        assert r.status_code == 200, topic
+        if r.json()["personalized"]:
+            assert r.json()["highlight"]["reason"] and r.json()["highlight"]["because"] == [], topic
+    assert c.get("/api/me/moments", headers=h).status_code == 200
+
+
+def test_money_stress_experience_is_support_first(client, login, api_main, monkeypatch):
+    original = api_main.load_twin
+
+    def stressed(con, cid):
+        twin = original(con, cid)
+        twin["facts"]["money_stress"] = dict(key="money_stress", value=True, confidence=0.9, since=None, evidence=[],
+                                             summary="7 days in the red in the last 90 days", implies=[])
+        return twin
+
+    h = login(1)
+    assert "support_first" not in client.get("/api/experience/car_loan", headers=h).json()
+    monkeypatch.setattr(api_main, "load_twin", stressed)
+    loan = client.get("/api/experience/car_loan", headers=h).json()
+    assert loan["support_first"] is True and loan["personalized"] is True
+    assert loan["highlight"]["id"] not in CATALOG["car_loan"]["variants"] and loan["highlight"]["reason"]
+    assert {a["id"] for a in loan["alternatives"]} == set(CATALOG["car_loan"]["variants"])
+    home = client.get("/api/experience/home", headers=h).json()
+    assert home["support_first"] is True and home["highlight"]["id"] == "home_insurance"
+    assert "support_first" not in client.get("/api/experience/car_loan").json()  # anonymous visitors
 
 
 # ====================================================================== response hardening

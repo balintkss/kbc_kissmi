@@ -117,7 +117,14 @@ def compact_twin(twin):
 class Assistant:
     def __init__(self, con: sqlite3.Connection, customer_id: int, twin: dict):
         self.con, self.cid, self.twin = con, customer_id, twin
-        self.client = OpenAI()
+        self._client = None  # created lazily in reply(): opener() and history() work without OPENAI_API_KEY
+
+    @property
+    def client(self):
+        """The OpenAI client, built on first use. Without a key this raises openai.OpenAIError (the API maps it to 503)."""
+        if self._client is None:
+            self._client = OpenAI()
+        return self._client
 
     # ------------------------------------------------------------------ tools (always scoped to self.cid)
     def check_affordability(self, amount, by_date, purpose=None):
@@ -186,11 +193,15 @@ class Assistant:
         if topic not in CATALOG:
             return {"error": "unknown topic"}
         p = page(self.twin, topic)
+        support = {"support_first": True} if p.get("support_first") else {}
         if not p["personalized"]:
-            return {"topic": topic, "note": "no strong fit from the twin", "options": [v["name"] for v in p["variants"]]}
+            return {"topic": topic, "note": "no strong fit from the twin", **support, "options": [v["name"] for v in p["variants"]]}
         h = p["highlight"]
-        return {"topic": topic, "recommended": h["name"], "reason": h["reason"], "based_on": [f["summary"] for f in h["because"]],
-                "alternatives": [a["name"] for a in p["alternatives"]]}
+        if h["id"] not in CATALOG[topic]["variants"]:  # money stress: a "payday plan first" card instead of a product
+            return {"topic": topic, **support, "note": "money stress: do not recommend a product, help with the payday plan first",
+                    "reason": h["reason"], "based_on": [f["summary"] for f in h["because"]]}
+        return {"topic": topic, "recommended": h["name"], **support, "reason": h["reason"],
+                "based_on": [f["summary"] for f in h["because"]], "alternatives": [a["name"] for a in p["alternatives"]]}
 
     def payday_plan(self):
         return self.twin.get("plan") or {"note": "no regular payday detected"}
@@ -220,12 +231,22 @@ class Assistant:
                 break
             messages.append(msg.model_dump(exclude_none=True))
             for call in msg.tool_calls:
-                fn = getattr(self, call.function.name, None) if call.function.name in {t["function"]["name"] for t in TOOLS} else None
-                try:
-                    result = fn(**json.loads(call.function.arguments or "{}")) if fn else {"error": "unknown tool"}
-                except (TypeError, ValueError) as e:
-                    result = {"error": f"bad arguments: {e}"}
-                used.append({"tool": call.function.name, "arguments": json.loads(call.function.arguments or "{}")})
+                name = call.function.name
+                fn = getattr(self, name, None) if name in {t["function"]["name"] for t in TOOLS} else None
+                try:  # the model's arguments are parsed exactly once; broken JSON becomes an error payload, never a 500
+                    args, error = json.loads(call.function.arguments or "{}"), None
+                except ValueError as e:  # json.JSONDecodeError
+                    args, error = {}, f"bad arguments: invalid JSON ({e})"
+                if not fn:
+                    result = {"error": "unknown tool"}
+                elif error:
+                    result = {"error": error}
+                else:
+                    try:
+                        result = fn(**args)
+                    except (TypeError, ValueError) as e:
+                        result = {"error": f"bad arguments: {e}"}
+                used.append({"tool": name, "arguments": args if isinstance(args, dict) else {}})
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": json.dumps(result, default=str)})
         answer = msg.content or ""
         self._save("user", message)

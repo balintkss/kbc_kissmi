@@ -5,8 +5,9 @@ Security model
     the customer credentials. Their tokens carry role "ops": customer endpoints reject them, and
     customer tokens are rejected here, even when a customer id and a username look alike.
   * Every ops request re-checks that the user still exists with role "ops", so revoking works at once.
-  * Login is rate-limited per IP and per username (the same limiter and limits as customer login);
-    drill-down reads are rate-limited per advisor to stop bulk scraping.
+  * Login is rate-limited per IP and per username (the same limiter and limits as customer login:
+    only FAILED attempts count, checked before the password); drill-down reads are rate-limited
+    per advisor to stop bulk scraping.
   * Every access to an individual customer's data (listed in the picker or opened) is written to
     ops_audit (at, username, customer_id, action). So are ops logins.
   * Responses only carry inferred twin data, master data and products: never the evaluation tables,
@@ -64,6 +65,11 @@ def _rate_limited(key, **kw):
     return limiter(key, **kw)
 
 
+def _login_throttle():
+    from api.main import begin_login_attempt, end_login_attempt  # lazy: api.main mounts this router
+    return begin_login_attempt, end_login_attempt
+
+
 def _customer_twin(con, customer_id):
     """The twin exactly as the customer-facing endpoints load it (the customer's own corrections applied)."""
     from api.main import load_twin  # lazy: api.main mounts this router
@@ -94,11 +100,18 @@ class OpsLogin(BaseModel):
 @router.post("/login")
 def ops_login(body: OpsLogin, request: Request, con=Depends(db)):
     ip = request.client.host if request.client else "unknown"
-    if _rate_limited(f"ops_ip:{ip}") or _rate_limited(f"ops_user:{body.username}"):
+    keys = (f"ops_ip:{ip}", f"ops_user:{body.username}")
+    begin, end = _login_throttle()
+    ticket = begin(keys)  # checked before the password; only failures use up the budget
+    if ticket is None:
         raise HTTPException(429, "Too many attempts, try again in a few minutes")
-    row = con.execute("SELECT password_hash, role FROM ops_users WHERE username = ?", (body.username,)).fetchone()
-    password_ok = verify_password(body.password, row[0] if row else _DUMMY_HASH)
-    ok = bool(row) and password_ok and row[1] == ROLE
+    ok = False
+    try:
+        row = con.execute("SELECT password_hash, role FROM ops_users WHERE username = ?", (body.username,)).fetchone()
+        password_ok = verify_password(body.password, row[0] if row else _DUMMY_HASH)
+        ok = bool(row) and password_ok and row[1] == ROLE
+    finally:
+        end(keys, ticket, ok, clear=(f"ops_user:{body.username}",))
     _audit(con, body.username, None, "login" if ok else "login_failed")
     if not ok:
         raise HTTPException(401, "Invalid username or password")

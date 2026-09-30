@@ -29,9 +29,10 @@ Team: **A** = backend (data, twin, recommender, API, Kate; built with Claude). *
 | `twin/benchmark.py` | Read-only speed benchmark behind the 2.3M projection | A |
 | `docs/DATABASE_HANDOFF.md` | Database and API connection contract for humans and coding agents | Read before any database or frontend integration |
 | `AGENTS.md`, `CLAUDE.md`, `.cursor/rules/project.mdc` | This guide and its pointers | Both |
-| `data/generate_db.py` | Seeded synthetic Belgian bank: 5K customers, ~2.16M transactions, demo personas 1–4 | **A: do not edit** |
+| `data/generate_db.py` | Seeded synthetic Belgian bank: 5K customers, ~2.16M transactions, demo personas 1–4 (`DEMO_PERSONAS`) + 113 (`EXTRA_DEMO_IDS`) | **A: do not edit** |
 | `data/kbc_twin.db` | Generated SQLite DB (~300 MB) | git-ignored, regenerate it, never commit |
 | `data/demo_credentials.txt` | Demo persona logins (plain text) | git-ignored. **Never commit, paste, screenshot or hard-code** |
+| `data/ops_credentials.txt` | Ops/advisor login for `/ops` (plain text) | git-ignored. **Never commit, paste, screenshot or hard-code** |
 | `twin/engine.py` | Transactions → facts → implications → recurring bills → payday plan (`AS_OF = 2026-09-30`) | **A: do not edit** |
 | `twin/recommender.py` | `page(twin, topic)` (highlight-one) and `moments(twin)` (push/feed/held_back) | **A: do not edit** |
 | `twin/catalog.py` | Product variants per topic (KBC product families, illustrative text) | **A: do not edit** |
@@ -40,7 +41,13 @@ Team: **A** = backend (data, twin, recommender, API, Kate; built with Claude). *
 | `api/main.py` | FastAPI app: all endpoints, CORS, security headers, rate limits | **A: do not edit** |
 | `api/security.py` | PBKDF2 passwords, HMAC-SHA256 bearer tokens (1 h) | **A: do not edit** |
 | `api/env.py` | Loads `.env` into the environment (real env vars win) | A |
-| `api/seed_credentials.py` | Creates logins, writes demo passwords to `data/demo_credentials.txt` | A |
+| `api/seed_credentials.py` | Creates missing logins, writes demo passwords to `data/demo_credentials.txt`. Idempotent: re-running keeps existing passwords; `--rotate` issues new ones for everyone | A |
+| `api/ops.py` | Ops & advisor channel: `/api/ops/*` (ops-role tokens only, audited) and the static `/ops` dashboard | **A: do not edit** |
+| `api/seed_ops.py` | Creates/rotates the ops login `advisor`, writes it to `data/ops_credentials.txt` | A |
+| `twin/population.py` | Population aggregates, advisor picker and drill-down behind `/api/ops/*` | **A: do not edit** |
+| `dashboard/` | The ops / advisor view (plain JS + CSS, served at `/ops`, strict CSP) | **A: do not edit** |
+| `tests/` | pytest suite (API, ops, twin, Kate with a scripted fake LLM, hardening). No real OpenAI calls; DB tests skip on a fresh clone | A |
+| `pytest.ini`, `requirements-dev.txt` | Test config (`needs_db` marker) and test deps (`-r requirements.txt` + pytest) | A |
 | `requirements.txt`, `.env.example` | Python deps, env placeholders (no real values) | A (coordinate) |
 | `.env` | Local secrets | git-ignored. **Never commit or print** |
 | `web/` *(to create)* | The frontend | **B owns it** |
@@ -59,13 +66,15 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # Python 3.
 .venv/bin/python -m twin.evaluate             # optional: accuracy vs hidden truth
 .venv/bin/python -m twin.engine --customer 1  # optional: print Lotte's twin as JSON
 .venv/bin/python -m api.seed_credentials      # logins; demo passwords → data/demo_credentials.txt (git-ignored)
+.venv/bin/python -m api.seed_ops              # ops login 'advisor' → data/ops_credentials.txt (git-ignored); dashboard at /ops
 cp .env.example .env                          # then fill in OPENAI_API_KEY and a random TWIN_SECRET
 .venv/bin/uvicorn api.main:app --reload       # http://localhost:8000, docs at http://localhost:8000/api/docs
+.venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest -q   # tests (never call OpenAI)
 ```
 
-- **The DB is deterministic** (seed 42), so everyone gets the same customers and transactions. **Passwords are not**: each run of `seed_credentials` makes new random ones. Read yours locally from `data/demo_credentials.txt`. Never commit them, paste them in chat or put them in code.
-- Re-running `generate_db.py` wipes everything (credentials, feedback, chat history). After that, run `twin.engine` and `seed_credentials` again.
-- **`OPENAI_API_KEY`**: get it privately from A and put it only in `.env`. It never goes in code, the frontend, commits or screenshots. Without it everything works except Kate: `GET /api/me/chat` returns 500 and `POST /api/me/chat` returns 503.
+- **The DB is deterministic** (seed 42), so everyone gets the same customers and transactions. **Passwords are not**: `seed_credentials` generates them on your machine. Re-running it keeps existing passwords and only adds what's missing (e.g. a newly flagged demo persona); `--rotate` issues new ones for everyone. `seed_ops` rotates the ops password on every run. Read yours locally from `data/demo_credentials.txt` / `data/ops_credentials.txt`. Never commit them, paste them in chat or put them in code.
+- Re-running `generate_db.py` wipes everything (credentials, feedback, chat history, ops users and audit). After that, run `twin.engine`, `seed_credentials` and `seed_ops` again.
+- **`OPENAI_API_KEY`**: get it privately from A and put it only in `.env`. It never goes in code, the frontend, commits or screenshots. Without it everything works except Kate's answers: `GET /api/me/chat` (opener + history) still returns 200, `POST /api/me/chat` returns 503.
 - **`TWIN_SECRET`**: set one (`openssl rand -hex 32`). Without it, every `--reload` restart invalidates all tokens.
 - **`ALLOWED_ORIGINS`**: comma-separated, **no spaces**. The code default is `http://localhost:5173,http://localhost:3000,http://localhost:8000`, and `.env.example` sets `5173` and `3000`. A Vite dev server on 5173 works out of the box. The easiest setup is a Vite proxy, which avoids CORS entirely:
   ```js
@@ -87,7 +96,7 @@ Base: `http://localhost:8000`. JSON in and out. Auth: header `Authorization: Bea
 | 429 | Login: `"Too many attempts, try again in a few minutes"`. Chat: `"Slow down a little"` | Show the message and wait |
 | 503 | `"Kate is unavailable right now"` | Show it inside the chat and let the user retry |
 
-Errors are `{"detail": "..."}`. **Rate limits** are in memory and reset on API restart. Login allows **5 attempts per 5 min per IP and per customer id, successful logins included**, so don't re-login on every page reload. Chat allows 20 messages/min per customer.
+Errors are `{"detail": "..."}`. **Rate limits** are in memory and reset on API restart. Login allows **5 failed attempts per 5 min per IP and per customer id**. Successful logins don't count (and a success resets that customer's counter), so logging personas in and out during the demo is fine. The 6th failure within 5 min gives 429, even with the right password. Chat allows 20 messages/min per customer.
 
 ### POST /api/auth/login (no auth)
 ```json
@@ -95,6 +104,7 @@ Errors are `{"detail": "..."}`. **Rate limits** are in memory and reset on API r
 {"customer_id": 1, "password": "<local>"}   {"token": "<opaque>", "token_type": "bearer", "expires_in": 3600}
 ```
 There's no refresh and no logout endpoint. Logout = forget the token. After 1 h you get 401 and go back to login.
+`customer_id` must be an integer from 1 to 2³¹−1 and `password` 1–128 characters, else 422.
 
 ### GET /api/topics (no auth)
 ```json
@@ -102,7 +112,7 @@ There's no refresh and no logout endpoint. Logout = forget the token. After 1 h 
  {"id": "savings", "title": "Saving & investing"}, {"id": "home", "title": "Home"}, {"id": "family", "title": "Family"}]
 ```
 
-### GET /api/experience/{topic}?channel=app|web (auth optional)
+### GET /api/experience/{topic}?channel=app|web|advisor (auth optional)
 **Anonymous** (send no `Authorization` header):
 ```json
 {"topic": "car_insurance", "title": "Car insurance", "personalized": false, "highlight": null,
@@ -129,7 +139,7 @@ Gotchas:
 - `because` can be `[]` (Lotte / family). Hide the "because" block when it's empty.
 - A logged-in customer can still get `personalized: false`, e.g. Emma / car_insurance (she has no car). Render the generic page then.
 - An invalid or expired token here gives **401, not an anonymous fallback**. Clear the token, or retry without the header.
-- `channel` is only echoed back. The content is identical for app and web.
+- `channel` must be `app`, `web` or `advisor` (default `web`); anything else is 422. It is only echoed back: the content is identical for every channel.
 - `topic` must match `^[a-z_]{1,40}$` (else 422) and exist (else 404).
 
 ### GET /api/me (auth)
@@ -175,7 +185,7 @@ After a customer rejects a fact that shaped the plan, the plan is recomputed on 
 ```json
 {"push": [
    {"kind": "salary_plan", "priority": 90, "title": "Your payday plan is ready",
-    "body": "€2,850 arrives on 2026-10-23. Bills €1,458, set aside €131, save €200 — that leaves €151/week to spend freely.",
+    "body": "€2,850 arrives on Fri 23 Oct. Bills €1,458, set aside €131, save €200 — that leaves €151/week to spend freely.",
     "topic": null, "sales": false},
    {"kind": "new_car", "priority": 80, "title": "Congrats on the car!",
     "body": "Beyond fuel it will cost ≈ €960/year (maintenance, tax, inspection). Shall we set aside €80/month from payday?",
@@ -216,6 +226,16 @@ After a customer rejects a fact that shaped the plan, the plan is recomputed on 
 - A rejected fact immediately stops driving highlights, moments and Kate, **and the payday plan is recalculated** (reserves, fuel, savings). Refetch `/twin`, `/plan`, `/moments` and `/experience/*` afterwards.
 - Feedback persists in the local DB. To reset a persona locally: `sqlite3 data/kbc_twin.db "DELETE FROM twin_feedback WHERE customer_id=1"`.
 
+### Ops / advisor API: `/api/ops/*` (advisor channel, ops-role token only)
+**The frontend must not call these with a customer token** (they return 401, and ops tokens get 401 on `/api/me/*`). The ops dashboard at `/ops` already uses them. Every ops login and every customer an advisor lists or opens is written to `ops_audit(at, username, customer_id, action)`.
+
+| Endpoint | Returns |
+|---|---|
+| `POST /api/ops/login` `{username, password}` | `{token, token_type: "bearer", expires_in: 3600, username}`. Same throttle as customer login: 5 **failed** attempts per 5 min per IP and per username |
+| `GET /api/ops/overview` | Population counts only, no individual customers (cached 10 min): `{as_of, population{customers, twins_built, facts_inferred, facts_per_customer, avg_confidence}, coverage[{fact, label, customers, share, breakdown[]}], life_events{window_days, total, by_type[]}, moments{push_total, feed_total, held_back_total, customers_held_back, customers_money_stress, support_offered, by_kind[]}, opportunities[], car_insurance_elsewhere_by_insurer[], highlights[{topic, title, generic, variants[{id, name, customers}]}], corrections{confirmed, rejected, customers}, scale{target_customers, build_*, view_*, llm_calls_for_inference, headline}}` |
+| `GET /api/ops/customers?has=<fact>&event=<type>&limit=1-50` | Advisor picker, demo personas first: `{total, customers[{customer_id, name, city, headline[]}]}`. `has` = a fact key, `event` = `new_car\|new_baby\|moved\|first_job\|new_job\|new_pet` (last 90 days); unknown values are 422. 120 requests/min per advisor |
+| `GET /api/ops/customers/{id}` | Drill-down, the same twin the customer sees: `{customer_id, name, first_name, city, language, region, age, customer_since, as_of, products[{code, name, since}], facts[{key, label, value, summary, confidence, since, implies, evidence_count, details, rejected_by_customer, confirmed_by_customer, customer_note}], plan, moments{push, feed, held_back}, highlights[{topic, title, personalized, highlight, alternatives[names]}], support_first}`. `id` must be 1 to 2³¹−1 (else 422); unknown customer is 404 `"Unknown customer"` |
+
 ## 5. Screens to build (priority order for the demo)
 
 | Persona (id) | Story | What the UI shows |
@@ -224,13 +244,14 @@ After a customer rejects a fact that shaped the plan, the plan is recomputed on 
 | **Julien** (2), 34, Namur, fr | Baby born July 2026, diesel car, dog, KBC mortgage | Push: payday plan + "Welcome to your little one" → family highlights **Hospitalisation insurance**. Kate answers in French |
 | **Emma** (3), 23, Leuven, nl | Moved out of her student room in August, first salary at Deloitte in September | Push: payday plan + "Settled in?" → home highlights **Home insurance**. Feed: "New job, new plan". car_insurance stays generic (no car) |
 | **Marc** (4), 47, Antwerpen, nl | Self-employed, irregular income, EV, two kids | Push: **"A quiet month would be tight"** (negative free_to_spend). car_loan highlights **Green car loan**. The glass box says "dog", but the data planted a cat: a real live **"That's not me"** demo |
+| **Jens** (5, customer id **113**), 21, Gent, nl | **Money stress.** Student (≈ €782/month from student jobs and parents), moved into a €605/month rental in July 2026, in the red on 46 of the last 90 days, no buffer | Push: **"Let's get ahead of next month"** (support) + a payday plan that is €90/week short. `held_back` has the "Settled in?" home-insurance message (**we hold back sales and help first**). Every `/experience` block carries `support_first: true`. Log in with id 113 |
 
-a. **Login + persona picker.** Four cards (name, city, one-line story) plus a password field. The user types the password, read locally from `data/demo_credentials.txt`, which must never be bundled or pre-filled. Then `POST /api/auth/login` and `GET /api/me` for the greeting.
+a. **Login + persona picker.** Five cards (name, city, one-line story; Jens logs in with customer id 113) plus a password field. The user types the password, read locally from `data/demo_credentials.txt`, which must never be bundled or pre-filled. Then `POST /api/auth/login` and `GET /api/me` for the greeting.
 b. **App home (phone frame, ~390 px wide).** A big payday push card (`push[0]`, and `push[1]` if present), then the moments feed. Cards with a `topic` open screen (e).
 c. **Kate chat.** Load `GET /api/me/chat`, show `opener` as Kate's first bubble, then `history`. On send: an optimistic user bubble, a typing indicator and a disabled input until the answer arrives. Under the answer, show a small hint from `tools_used`: `payday_plan` → "Kate checked: your payday plan", `check_affordability` → "Kate checked: affordability", `spending_summary` → "Kate checked: your spending", `recommend_product` → "Kate checked: best fit for {topic}".
 d. **"What KBC knows about me" (glass box).** `GET /api/me/twin?with_evidence=true`. One card per fact: summary, a confidence bar, since, implications and expandable evidence transactions (date, counterparty, amount). Add **"That's right" / "That's not me"** buttons (feedback endpoint, optional note), then refetch. Style rejected facts as struck-through.
 e. **Product topic page (highlight-one).** `GET /api/experience/{topic}`: a highlight card with the reason and "Because we know: {because[].summary} ({confidence})", plus the alternatives collapsed. **Key demo moment:** a **website view side by side, anonymous (no header) vs logged-in (with token)** for the same topic.
-f. **Ops / advisor dashboard: do NOT build it.** Person A is building it (`/ops`, `dashboard/`, `api/ops.py`, `twin/population.py`) with its own advisor login. It will be documented here when it lands. Just link to `/ops` from your UI if you want.
+f. **Ops / advisor dashboard: it exists at `/ops`, so don't rebuild it.** It's served by the API (`dashboard/`, `api/ops.py`, `twin/population.py`) with its own advisor login (`python -m api.seed_ops`) and the `/api/ops/*` contract above. Just link to `/ops` from your UI if you want.
 
 Topics bar: `GET /api/topics`. Keep one API client module shared by the app view and the web view.
 
@@ -272,12 +293,11 @@ export async function api(path, { method = "GET", body, auth = true } = {}) {
 
 ## 8. Known limitations (design around them)
 
-**In progress on the backend (A), don't work around these yourself:** the ops/advisor dashboard (`/ops`, `api/ops.py`), a pytest suite (`tests/`), counting only *failed* logins in the rate limit, a money-stress demo persona with its own login, validating `channel`, and a 503 instead of a 500 for chat without a key. This section is updated when they land.
 
 - **Kate is slow.** Replies take a few seconds: show a typing indicator and block double-send. Watch the rate limit of 20 messages/min.
-- **Today is 2026-09-30** in the data (`AS_OF`). All dates are ISO strings (`2026-10-23`), so format them in the UI. The text inside moment bodies and reasons is pre-formatted English with ISO dates.
+- **Today is 2026-09-30** in the data (`AS_OF`). Structured fields (`plan.payday`, fact `since`/`value`, `recurring[].next_date`, evidence `date`) are ISO strings (`2026-10-23`): format them in the UI. Customer-facing text (moment bodies, highlight `reason`, `because[].summary`) is pre-formatted English with friendly dates ("Fri 23 Oct", "13 Jun 2026"). Raw fact `summary` in `/api/me/twin` may still contain ISO dates.
+- **Money stress → `support_first: true`** on every `/api/experience/*` block. For `car_loan` the highlight is then a non-catalogue card with `id: "support"` ("Your payday plan first", no loan offered) and all loans collapsed as alternatives; `home` never highlights a loan and `savings` only a buffer. Render the support card like any highlight but without a buy/apply button.
 - **Amounts** are EUR numbers, where negative means money out. The plan's `free_*` values can be negative (Marc).
-- **Logins are rate-limited:** 5 per 5 min per IP, successful ones included. Keep the token across screen changes. Restarting the API resets the limiter.
+- **Failed logins are rate-limited:** 5 per 5 min per IP and per customer id (successful logins don't count). A room of judges behind one NAT shares the per-IP budget, so mistyped passwords add up. Restarting the API resets the limiter.
 - **Tokens last 1 h**, with no refresh. Without `TWIN_SECRET` in `.env`, every API restart logs everyone out.
-- **No money-stress demo:** none of the 4 personas has `money_stress`, so `held_back` and the `support` moment are empty in the demo (only non-demo customers have them).
-- **`channel` has no effect** on the content. Chat without `OPENAI_API_KEY` fails: GET 500, POST 503.
+- **`channel` has no effect** on the content (it is validated and echoed). Chat without `OPENAI_API_KEY`: GET 200 (opener/history), POST 503.

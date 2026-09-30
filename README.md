@@ -88,18 +88,19 @@ twin/recommender.py      page(twin, topic)  → one highlighted variant + reason
 twin/catalog.py          moments(twin)      → push / feed / held-back messages
         │
         ▼
-api/                     FastAPI, one API for all channels: login, experience blocks, twin, plan, moments, feedback
-        │                api/ops.py + twin/population.py + dashboard/ → /ops: population dashboard & advisor drill-down (ops role, audited)
+api/                     FastAPI, one API for all channels: login, experience blocks, twin, plan, moments, feedback, Kate
+        │                api/ops.py + twin/population.py → /api/ops/*: population aggregates & advisor drill-down (ops role, audited)
         │
         ▼
-app + website            render the same experience blocks (to do)
+web/                     customer app view + website view, rendering the same experience blocks (owned by our frontend teammate, in progress)
+dashboard/               ops / advisor view, served by the API at /ops (static, same origin, strict CSP)
 ```
 
 ### What the twin infers today
 
 employment & employer · net income & payday · job change / first job · car (combustion/electric, older car, recently bought, price, insurer) · pet (dog/cat) · children & newborn · childcare · housing (rent / mortgage / owner / student room / parents) · recent move · train commuter · gym · subscriptions · travel · monthly savings · financial buffer (months) · money stress · recurring monthly, quarterly and yearly bills.
 
-### Demo personas (customer IDs 1–4)
+### Demo personas (customer IDs 1–4 and 113)
 
 | ID | Who | Story |
 |---|---|---|
@@ -107,6 +108,9 @@ employment & employer · net income & payday · job change / first job · car (c
 | 2 | **Julien**, 34, Namur (fr) | Baby born July 2026; diesel car; dog; KBC mortgage. |
 | 3 | **Emma**, 23, Leuven (nl) | Moved out of her student room in August; first salary at Deloitte in September. |
 | 4 | **Marc**, 47, Antwerpen (nl) | Self-employed, irregular income, EV, two kids — a quiet month would be tight. |
+| 113 | **Jens**, 21, Gent (nl) | Persona 5, **money stress**: student (≈ €782/month from student jobs and parents), moved into a rental in July 2026, in the red on 46 of the last 90 days, no buffer. The "Settled in?" home-insurance message is **held back**; he gets the support push instead, and every product page is support-first. |
+
+Personas 1–4 are hand-written in `data/generate_db.py`; persona 5 is an ordinary seeded customer flagged via `EXTRA_DEMO_IDS`.
 
 ## Run it
 
@@ -117,17 +121,23 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m twin.evaluate             # accuracy vs. hidden truth
 .venv/bin/python -m twin.engine --customer 1  # print Lotte's twin as JSON
 .venv/bin/python -m api.seed_credentials      # logins; demo persona passwords -> data/demo_credentials.txt (git-ignored)
+                                              #   re-running keeps existing passwords; --rotate issues new ones for everyone
 .venv/bin/python -m api.seed_ops              # ops/advisor login 'advisor' -> data/ops_credentials.txt (git-ignored); dashboard at /ops
 cp .env.example .env                          # then fill in OPENAI_API_KEY and a random TWIN_SECRET
 .venv/bin/uvicorn api.main:app --reload       # API docs at http://localhost:8000/api/docs
+
+# tests (no real OpenAI calls; DB tests are skipped until the steps above have run)
+.venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest -q
 ```
 
 ### API (same JSON for app and website)
 
 | Endpoint | Auth | What it returns |
 |---|---|---|
-| `POST /api/auth/login` | – | `{customer_id, password}` → bearer token (1 h). Rate-limited. |
-| `GET /api/experience/{topic}?channel=app\|web` | optional | Anonymous: all variants. Logged in: **one highlight + reason + facts**, alternatives collapsed. Topics: `car_loan`, `car_insurance`, `savings`, `home`, `family` |
+| `POST /api/auth/login` | – | `{customer_id, password}` → bearer token (1 h). Rate-limited: 5 **failed** attempts per 5 min per IP and per customer (successful logins don't count) |
+| `GET /api/topics` | – | The product topics: `[{id, title}]` |
+| `GET /api/experience/{topic}?channel=app\|web\|advisor` | optional | Anonymous: all variants. Logged in: **one highlight + reason + facts**, alternatives collapsed. Topics: `car_loan`, `car_insurance`, `savings`, `home`, `family` |
+| `GET /api/me` | required | Who is logged in: `{customer_id, name, first_name, language, city, age, kbc_products}` |
 | `GET /api/me/twin?with_evidence=true` | required | Glass box: every fact, confidence, since, implications and the proving transactions |
 | `GET /api/me/plan` | required | Payday plan: bills, reserves, savings, free to spend per week |
 | `GET /api/me/moments` | required | `push` (max 2), `feed`, and `held_back` (sales suppressed under money stress) |
@@ -140,12 +150,12 @@ cp .env.example .env                          # then fill in OPENAI_API_KEY and 
 | `GET /api/ops/customers?has=<fact>&event=<type>&limit=1-50` | ops | Advisor picker (demo personas first). Every customer listed is written to `ops_audit` |
 | `GET /api/ops/customers/{id}` | ops | Advisor drill-down: the same twin the customer sees (facts, plan, one highlight per topic, moments incl. held back). **Every access is logged** in `ops_audit(at, username, customer_id, action)` |
 
-The generator is seeded, so everyone gets the same database.
+The generator is seeded, so everyone gets the same customers and transactions. Passwords are not part of it: `seed_credentials` and `seed_ops` generate them on each machine, so read yours from the git-ignored `data/*_credentials.txt`.
 
 ## Security (Aikido audit = 10% of the score)
 
 - The customer id always comes from the signed session token (HMAC-SHA256, 1 h expiry), never from the URL or body → no IDOR. Evidence queries are also scoped by `customer_id`.
-- Passwords PBKDF2-SHA256 with a per-user salt; login rate-limited per IP and per customer; strict CORS; security headers.
+- Passwords PBKDF2-SHA256 with a per-user salt; login rate-limited per IP and per customer (failed attempts only, checked before the password); strict CORS; security headers.
 - `TWIN_SECRET` comes from the environment (see `.env.example`); without it a random per-process secret is used. No real customer data anywhere.
 - `truth_*` tables are for evaluation only and never exposed through the API.
 
@@ -158,7 +168,10 @@ The generator is seeded, so everyone gets the same database.
 - [x] API with login, experience blocks, glass-box twin, plan, moments
 - [x] Customer correction of facts ("that's not right") — corrections immediately adjust the payday plan (car/pet reserves, fuel, savings) without rebuilding the twin (`twin/feedback.py`)
 - [x] Kate chat over the twin ("pull") with grounded tools, in the customer's language (nl/fr/en)
-- [ ] App + website frontends, ops dashboard for the 5K population
+- [x] Ops & advisor dashboard for the 5K population (`/ops`, separate ops login, every customer access audited)
+- [x] Money-stress demo persona (5, Jens): sales held back, support first
+- [x] Test suite: 424 tests, all passing (`python -m pytest -q`)
+- [ ] App + website frontends (`web/`, our frontend teammate)
 - [ ] Aikido scan before/after, demo video
 
 Product names follow KBC's product families, but descriptions and rates in `twin/catalog.py` are illustrative placeholders, not real KBC terms.

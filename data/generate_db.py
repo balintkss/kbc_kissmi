@@ -8,6 +8,8 @@ The digital twin has to infer them. The ground truth lives in the `truth_*`
 tables so we can score how well the twin recovers it; the twin must never read
 those tables.
 
+Demo personas: 1-4 are hand-written (DEMO_PERSONAS); 5 is seeded customer 113 (EXTRA_DEMO_IDS, money stress).
+
 Usage:
     python data/generate_db.py                      # 5000 customers -> data/kbc_twin.db
     python data/generate_db.py --customers 500 --seed 7 --out /tmp/small.db
@@ -727,6 +729,18 @@ DEMO_PERSONAS = [
          saver=0.1, overspend=1.12, events=[]),
 ]
 
+# 5. Jens (customer 113): the money-stress persona. Not hand-written like 1-4 but an ordinary seeded customer,
+#    picked because his twin tells the "help first, sell later" story: a 21-year-old student in Gent (student
+#    jobs + parents ≈ €782/month) who moved into a €605/month rental in July 2026. Over the last 90 days he spent
+#    €6,387 against €2,230 coming in, was in the red on 46 days and has no buffer: his payday plan is €90/week short. Under
+#    money stress the engine holds back the "Settled in?" home-insurance message and pushes the support
+#    moment ("Let's get ahead of next month") instead.
+#    Only the is_demo_persona flag changes: no override, no extra random draws, so the RNG stream (and every
+#    customer, transaction and IBAN) is identical to a build without it. The id is only meaningful for the
+#    default seed, because the seed decides who customer 113 is.
+EXTRA_DEMO_IDS = {113}
+EXTRA_DEMO_SEED = 42
+
 
 # --------------------------------------------------------------------------- DB
 
@@ -808,14 +822,16 @@ def build(n_customers, seed, out):
     account_id = 0
     tx_rows, n_tx = [], 0
 
+    extra_demo = EXTRA_DEMO_IDS if seed == EXTRA_DEMO_SEED else set()
     for cid in range(1, n_customers + 1):
         override = DEMO_PERSONAS[cid - 1] if cid <= len(DEMO_PERSONAS) else None
         g = CustomerGen(cid, random.Random(rnd.random()), override).generate()
         p = g.p
         since = min(pr[1] for pr in g.products)
+        is_demo = bool(override) or cid in extra_demo  # a set lookup: consumes no randomness
         con.execute("INSERT INTO customers VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                     (cid, p["first"], p["last"], p["gender"], END.year - p["age"], p["lang"], p["region"], p["city"], p["postcode"],
-                     since.isoformat(), 1 if override else 0))
+                     since.isoformat(), 1 if is_demo else 0))
 
         balances = {}
         acc_ids = {}

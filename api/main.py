@@ -8,11 +8,13 @@ Run:  uvicorn api.main:app --reload
 import json
 import os
 import sqlite3
+import threading
 import time
 from collections import defaultdict, deque
+from typing import Literal
 
 import api.env  # noqa: F401  (must run before api.security reads TWIN_SECRET)
-from fastapi import Depends, FastAPI, Header, HTTPException, Path, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -60,32 +62,79 @@ with sqlite3.connect(DB) as _con:
 
 # ---------------------------------------------------------------------- auth
 
-_attempts = defaultdict(deque)
-MAX_ATTEMPTS, WINDOW = 5, 300
+_attempts = defaultdict(deque)   # key -> timestamps (in-memory, reset on restart)
+_attempts_lock = threading.Lock()  # sync endpoints run in a thread pool
+MAX_ATTEMPTS, WINDOW = 5, 300       # login: 5 FAILED attempts per 5 min, per IP and per account
+
+
+def _prune(q, now, window):
+    while q and q[0] < now - window:
+        q.popleft()
 
 
 def _rate_limited(key, limit=MAX_ATTEMPTS, window=WINDOW):
-    q, now = _attempts[key], time.time()
-    while q and q[0] < now - window:
-        q.popleft()
-    if len(q) >= limit:
-        return True
-    q.append(now)
-    return False
+    """Count this request against `key`; True when over the limit (chat, ops views: every call counts)."""
+    with _attempts_lock:
+        q, now = _attempts[key], time.time()
+        _prune(q, now, window)
+        if len(q) >= limit:
+            return True
+        q.append(now)
+        return False
+
+
+def begin_login_attempt(keys, limit=MAX_ATTEMPTS, window=WINDOW):
+    """Login throttle, checked BEFORE the password is verified. Only failed attempts count.
+
+    Returns None when any key already has `limit` failures in the window (-> 429). Otherwise it
+    reserves one slot on every key and returns a ticket for `end_login_attempt`. The slot is held
+    while the password is checked, so a burst of parallel guesses can't all slip past the check.
+    """
+    with _attempts_lock:
+        now = time.time()
+        queues = [_attempts[k] for k in keys]
+        for q in queues:
+            _prune(q, now, window)
+        if any(len(q) >= limit for q in queues):
+            return None
+        for q in queues:
+            q.append(now)
+        return now
+
+
+def end_login_attempt(keys, ticket, ok, clear=()):
+    """A failed attempt keeps its slot. A successful one gives it back (logging in and out is free)
+    and also clears the failure history of the keys in `clear` (the account, never the IP)."""
+    if not ok:
+        return
+    with _attempts_lock:
+        for k in keys:
+            q = _attempts.get(k)
+            if q is not None and ticket in q:
+                q.remove(ticket)
+        for k in clear:
+            _attempts.pop(k, None)
 
 
 class Login(BaseModel):
-    customer_id: int = Field(gt=0)
+    customer_id: int = Field(gt=0, lt=2**31)  # 32-bit ids: huge values are a clean 422, never a SQLite OverflowError (500)
     password: str = Field(min_length=1, max_length=128)
 
 
 @app.post("/api/auth/login")
 def login(body: Login, request: Request, con=Depends(db)):
     ip = request.client.host if request.client else "unknown"
-    if _rate_limited(f"ip:{ip}") or _rate_limited(f"cid:{body.customer_id}"):
+    keys = (f"ip:{ip}", f"cid:{body.customer_id}")
+    ticket = begin_login_attempt(keys)
+    if ticket is None:
         raise HTTPException(429, "Too many attempts, try again in a few minutes")
-    row = con.execute("SELECT password_hash FROM credentials WHERE customer_id = ?", (body.customer_id,)).fetchone()
-    if not row or not verify_password(body.password, row[0]):
+    ok = False
+    try:
+        row = con.execute("SELECT password_hash FROM credentials WHERE customer_id = ?", (body.customer_id,)).fetchone()
+        ok = bool(row) and verify_password(body.password, row[0])
+    finally:
+        end_login_attempt(keys, ticket, ok, clear=(f"cid:{body.customer_id}",))
+    if not ok:
         raise HTTPException(401, "Invalid customer id or password")
     return {"token": issue_token(body.customer_id), "token_type": "bearer", "expires_in": 3600}
 
@@ -140,8 +189,11 @@ def topics():
     return [{"id": k, "title": v["title"]} for k, v in CATALOG.items()]
 
 
+Channel = Literal["app", "web", "advisor"]
+
+
 @app.get("/api/experience/{topic}")
-def experience(topic: str = Path(pattern=r"^[a-z_]{1,40}$"), channel: str = "web",
+def experience(topic: str = Path(pattern=r"^[a-z_]{1,40}$"), channel: Channel = Query(default="web"),
                cid=Depends(optional_customer), con=Depends(db)):
     """Channel-agnostic block. Anonymous: every variant. Logged in: one highlight + reason."""
     if topic not in CATALOG:

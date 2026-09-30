@@ -218,14 +218,25 @@ def test_bad_tool_arguments_become_an_error_payload(kate, fake_openai, name, arg
 
 
 @needs_db
-@pytest.mark.xfail(strict=False, reason="BUG: Assistant.reply re-parses call.function.arguments with json.loads outside "
-                                        "the try block when recording tools_used, so malformed JSON from the model "
-                                        "raises JSONDecodeError -> HTTP 500 instead of an error payload")
 def test_malformed_tool_json_is_handled(make_client, login, fake_openai):
+    """Regression: reply() re-parsed the arguments outside the try when recording tools_used -> JSONDecodeError -> 500."""
     fake_openai.call_tools(("spending_summary", '{"months": 3')).say("Sorry, probeer opnieuw.")
     r = make_client(raise_server_exceptions=False).post("/api/me/chat", json={"message": "Hoeveel?"}, headers=login(1))
     assert r.status_code == 200
-    assert "error" in fake_openai.tool_results()[0]
+    assert r.json() == {"answer": "Sorry, probeer opnieuw.", "tools_used": [{"tool": "spending_summary", "arguments": {}}]}
+    (res,) = fake_openai.tool_results()
+    assert res["error"].startswith("bad arguments")
+
+
+@needs_db
+@pytest.mark.parametrize("raw", ['{"months": 3', "not json", "{'months': 3}", '{"months": 3}}', "\x00"])
+def test_malformed_tool_json_never_reaches_the_tool(kate, fake_openai, raw):
+    fake_openai.call_tools(("spending_summary", raw), ("payday_plan", {})).say("Oké.")
+    out = kate(1).reply("test")
+    assert out["tools_used"] == [{"tool": "spending_summary", "arguments": {}}, {"tool": "payday_plan", "arguments": {}}]
+    bad, good = fake_openai.tool_results()
+    assert set(bad) == {"error"} and bad["error"].startswith("bad arguments")
+    assert "free_to_spend" in good  # the other call in the same round still runs
 
 
 @needs_db
@@ -349,9 +360,46 @@ def test_chat_without_api_key_is_503(client, login, real_openai_without_key):
 
 
 @needs_db
-@pytest.mark.xfail(strict=False, reason="BUG: GET /api/me/chat constructs Assistant() -> OpenAI() just to return the "
-                                        "opener and history; without OPENAI_API_KEY that raises openai.OpenAIError "
-                                        "and the endpoint returns 500 although it needs no LLM")
 def test_chat_history_works_without_api_key(make_client, login, real_openai_without_key):
+    """Regression: GET /api/me/chat built the OpenAI client just to return opener + history -> 500 without a key."""
     h = login(1)
-    assert make_client(raise_server_exceptions=False).get("/api/me/chat", headers=h).status_code == 200
+    r = make_client(raise_server_exceptions=False).get("/api/me/chat", headers=h)
+    assert r.status_code == 200
+    assert r.json()["opener"]["kind"] == "salary_plan"
+
+
+@needs_db
+def test_openai_client_is_created_only_when_kate_replies(kate, monkeypatch, fake_openai):
+    import twin.assistant
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    made = []
+    monkeypatch.setattr(twin.assistant, "OpenAI", lambda *a, **k: made.append(1) or fake_openai.client)
+    k = kate(1)
+    k.opener(), k.history(), k.recommend_product("car_insurance"), k.payday_plan()
+    assert made == []
+    k.reply("Hoi")
+    k.reply("Nog eens")
+    assert made == [1]  # built once, on the first reply, then reused
+
+
+@needs_db
+def test_reply_without_api_key_raises_an_openai_error_before_saving(kate, ro_con, real_openai_without_key):
+    k = kate(1)  # constructing Kate needs no key
+    before = chat_rows(ro_con, 1)
+    with pytest.raises(openai.OpenAIError) as exc:
+        k.reply("Hallo")
+    assert type(exc.value).__module__.startswith("openai")  # what api/main.py maps to 503
+    assert chat_rows(ro_con, 1) == before
+
+
+@needs_db
+def test_recommend_product_under_money_stress_recommends_no_loan(kate):
+    k = kate(1)
+    k.twin["facts"]["money_stress"] = dict(key="money_stress", value=True, confidence=0.9, since=None, evidence=[],
+                                           summary="7 days in the red in the last 90 days", implies=[])
+    loan = k.recommend_product("car_loan")
+    assert loan["support_first"] is True and "recommended" not in loan and loan["reason"]
+    home = k.recommend_product("home")
+    assert home["support_first"] is True
+    assert home["recommended"] == CATALOG["home"]["variants"]["home_insurance"]["name"]
+    assert "support_first" not in kate(2).recommend_product("car_loan")

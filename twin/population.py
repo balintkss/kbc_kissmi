@@ -265,7 +265,10 @@ def _compute(con):
         "car_insurance_elsewhere_by_insurer": [{"insurer": k, "customers": n} for k, n in insurers.most_common()],
         "highlights": [{
             "topic": topic, "title": cat["title"], "generic": highlights[topic][None],
-            "variants": [{"id": vid, "name": v["name"], "customers": highlights[topic][vid]} for vid, v in cat["variants"].items()],
+            "variants": [{"id": vid, "name": v["name"], "customers": highlights[topic][vid]} for vid, v in cat["variants"].items()]
+                        # money-stressed customers get a "payday plan first" card instead of a product (no loan offered)
+                        + ([{"id": "support", "name": "Payday plan first (money stress, no offer)", "customers": highlights[topic]["support"]}]
+                           if highlights[topic]["support"] else []),
         } for topic, cat in CATALOG.items()],
         "corrections": {"confirmed": confirmed, "rejected": len(feedback) - confirmed,
                         "customers": len({cid for cid, _ in feedback})},
