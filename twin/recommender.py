@@ -12,7 +12,24 @@ Rules every picker follows:
   * every highlight carries a non-empty, honest reason;
   * under money stress (support-first) no credit is highlighted and no reason pushes new spending.
 Customer-facing text uses friendly dates ("Fri 23 Oct", "13 Jun 2026"); structured fields keep ISO dates.
+
+Confirmed-facts commercial gate (the Financial Understanding Contract, docs/KBC_VALUE_MATRIX.md): only facts the
+customer confirmed (glass box) or stated (Kate memory, twin/memory.py) may drive a commercial journey. Every
+personalized, non-support block gets `commercial_ok`; when a supporting fact is only inferred it also gets
+`needs_confirmation: [{"fact", "question": "We noticed <summary>. Is that right?"}]`. Mode: env TWIN_COMMERCIAL_GATE
+  confirm (default)  keep the highlight, flag it (commercial_ok false + needs_confirmation)
+  strict             no product until confirmed: the highlight becomes a question card with id "confirm"
+  off                no gate fields at all (the old behaviour)
+Support-first (money stress) blocks are left exactly as they are: they never sell anyway.
+
+Customer preferences (twin["preferences"], from twin/memory.py) are hard rules: a topic in `no_contact_topics`
+gets a non-promotional page, and its moments are held back ("Customer asked not to be contacted about <topic>").
+
+Production boundary (family): babies, births and children are never used unless the customer confirmed the
+household change (feedback on life_event_new_baby / children, or a household_change memory). Until then no
+new-baby moment, and the family page never mentions a baby, a birth, a child or a hospital.
 """
+import os
 import re
 from datetime import date
 
@@ -34,6 +51,15 @@ SUPPORT_HIGHLIGHT = dict(name="Your payday plan first", summary="No new credit f
                          features=["Move a bill to after payday", "Spread a large bill, no fees", "No product, no sales pitch"])
 NO_ROOM = ("Your budget has no room for a monthly payment right now — if a car is essential, a smaller second-hand loan "
            "keeps it manageable; let's first look at your payday plan.")
+
+GATE_MODES = ("confirm", "strict", "off")
+COMMERCIAL_OK = ("confirmed", "stated")  # provenance values that may drive a commercial journey
+# strict gate: shown instead of a product until the customer confirmed what the highlight would rest on.
+CONFIRM_HIGHLIGHT = dict(name="First, is this right?", summary="Confirm what we noticed and we'll suggest the one option that fits.",
+                         features=["One tap: that's right, or that's not me", "Nothing is suggested on a guess",
+                                   "Change or forget it any time"])
+CONFIRM_REASON = "We only suggest a product once you've confirmed what it's based on."
+HOUSEHOLD_FACTS = ("life_event_new_baby", "children", "household_change")
 
 
 def _nice_date(value):
@@ -66,6 +92,47 @@ def _num(fact, field="value"):
     """A numeric field of a fact, or None when the fact is missing/rejected or the value isn't a number."""
     v = fact.get(field) if fact else None
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def provenance(fact):
+    """confirmed (glass-box verdict) > stated (Kate memory) > ecosystem (reserved) > inferred (engine default).
+
+    twin/memory.apply_memories sets fact["provenance"]; a raw stored twin falls back to the feedback flags."""
+    p = fact.get("provenance") if isinstance(fact, dict) else None
+    if p in ("confirmed", "stated", "ecosystem", "inferred"):
+        return p
+    return "confirmed" if isinstance(fact, dict) and fact.get("confirmed_by_customer") else "inferred"
+
+
+def gate_mode():
+    """TWIN_COMMERCIAL_GATE = confirm (default) | strict | off, read on every call so it can change at runtime."""
+    mode = os.environ.get("TWIN_COMMERCIAL_GATE", "confirm").strip().lower()
+    return mode if mode in GATE_MODES else "confirm"
+
+
+def household_confirmed(t):
+    """The customer confirmed a household change themselves: feedback on a household fact, or a stated memory."""
+    for key in HOUSEHOLD_FACTS:
+        f = _fact(t, key)
+        if f and (f.get("confirmed_by_customer") or provenance(f) in COMMERCIAL_OK):
+            return True
+    return False
+
+
+def no_contact_topics(t):
+    return set(((t or {}).get("preferences") or {}).get("no_contact_topics") or ())
+
+
+def _topic_label(topic):
+    return CATALOG[topic]["title"].lower() if topic in CATALOG else str(topic).replace("_", " ")
+
+
+def _question(fact):
+    """'We noticed <summary>. Is that right?' in friendly dates."""
+    summary = _nice_date(fact.get("summary") or fact["key"].replace("_", " ")).rstrip(". ")
+    if len(summary) > 1 and summary[0].isupper() and summary[1].islower():
+        summary = summary[0].lower() + summary[1:]
+    return f"We noticed {summary}. Is that right?"
 
 
 def _affordable_loan(twin, share=0.35):
@@ -171,7 +238,14 @@ def _pick_home(t):
 
 
 def _pick_family(t):
-    baby, kids, pet = _fact(t, "life_event_new_baby"), _fact(t, "children"), _fact(t, "pet")
+    """Production boundary: a baby or children only count once the customer confirmed the household change.
+
+    Unconfirmed, the page falls back to pets / household liability and never mentions a baby, birth, child or hospital."""
+    confirmed = household_confirmed(t)
+    baby = _fact(t, "life_event_new_baby") if confirmed else None
+    kids = _fact(t, "children") if confirmed else None
+    change = _fact(t, "household_change") if confirmed else None
+    pet = _fact(t, "pet")
     if baby:
         born = _nice_date(baby.get("value") or baby.get("since"))
         return "hospital_insurance", (f"Congratulations! Adding your baby{f' (born around {born})' if born else ''} to hospitalisation "
@@ -181,6 +255,9 @@ def _pick_family(t):
         count = f" for {n:g} child{'ren' if n > 1 else ''}" if n and n > 0 else ""
         return "child_savings", (f"You receive child benefit{count}: "
                                  f"putting part of it aside monthly builds a start capital for later."), ["children"]
+    if change:
+        return "family_liability", ("You told us your household is changing: family liability covers everyone who lives "
+                                    "with you, and we can go through the rest of your cover together."), ["household_change"]
     if pet:
         return "family_liability", f"Your {pet.get('value') or 'pet'} is covered by family liability if it causes damage to others.", ["pet"]
     return "family_liability", "Covers damage you or your household cause to others.", []
@@ -229,19 +306,41 @@ def page(twin, topic):
     if not twin:
         return generic
     stressed = _fact(twin, "money_stress") is not None
+    flag = dict(support_first=True) if stressed else {}
+    if topic in no_contact_topics(twin):  # the customer's preference is a hard rule: every option, no suggestion
+        return dict(generic, **flag, no_contact=True,
+                    note=f"You asked us not to contact you about {_topic_label(topic)}, so we don't suggest anything here.")
     pick = PICKERS[topic](twin)
     if stressed:
         pick = _support_first(twin, topic, pick)
-    flag = dict(support_first=True) if stressed else {}
     if not pick:
         return dict(generic, **flag)
     vid, reason, fact_keys = pick
     cited = [f for f in (_fact(twin, k) for k in dict.fromkeys(fact_keys)) if f]  # rejected facts are never cited
-    because = [dict(key=f["key"], summary=_nice_date(f.get("summary", "")), confidence=f.get("confidence")) for f in cited]
+    because = [dict(key=f["key"], summary=_nice_date(f.get("summary", "")), confidence=f.get("confidence"),
+                    provenance=provenance(f)) for f in cited]
     variant = SUPPORT_HIGHLIGHT if vid == "support" else cat["variants"][vid]
-    return dict(topic=topic, title=cat["title"], personalized=True, **flag,
-                highlight=dict(id=vid, **variant, reason=reason, because=because),
-                alternatives=[dict(id=v["id"], name=v["name"], summary=v["summary"]) for v in variants if v["id"] != vid])
+    block = dict(topic=topic, title=cat["title"], personalized=True, **flag,
+                 highlight=dict(id=vid, **variant, reason=reason, because=because),
+                 alternatives=[dict(id=v["id"], name=v["name"], summary=v["summary"]) for v in variants if v["id"] != vid])
+    return block if stressed else _commercial_gate(block, cited, variants)
+
+
+def _commercial_gate(block, cited, variants):
+    """Only confirmed or stated facts may drive a commercial highlight (see the module docstring)."""
+    mode = gate_mode()
+    if mode == "off":
+        return block
+    unconfirmed = [f for f in cited if provenance(f) not in COMMERCIAL_OK]
+    if not unconfirmed:
+        return dict(block, commercial_ok=True)
+    block = dict(block, commercial_ok=False,
+                 needs_confirmation=[dict(fact=f["key"], question=_question(f)) for f in unconfirmed])
+    if mode == "strict":
+        block["highlight"] = dict(id="confirm", **CONFIRM_HIGHLIGHT, reason=CONFIRM_REASON,
+                                  because=block["highlight"]["because"])
+        block["alternatives"] = [dict(id=v["id"], name=v["name"], summary=v["summary"]) for v in variants]
+    return block
 
 
 def moments(twin, max_push=2, extra=None):
@@ -252,11 +351,14 @@ def moments(twin, max_push=2, extra=None):
     and held back by the same rules. With extra=None the result is exactly what it always was."""
     f = lambda k: _fact(twin, k)  # noqa: E731
     plan, stress = twin.get("plan"), f("money_stress")
+    quiet = no_contact_topics(twin)
     out, held = [], []
 
     def add(kind, priority, title, body, topic=None, sales=False):
         m = dict(kind=kind, priority=priority, title=title, body=body, topic=topic, sales=bool(sales))
-        if sales and stress:
+        if topic and topic in quiet:  # the customer's own preference outranks every other rule
+            held.append(dict(m, held_because=f"Customer asked not to be contacted about {_topic_label(topic)}"))
+        elif sales and stress:
             held.append(dict(m, held_because="Customer shows money stress: no product offers, only support."))
         else:
             out.append(m)
@@ -287,7 +389,7 @@ def moments(twin, max_push=2, extra=None):
                 f"Shall we set aside €{reserve}/month from payday?") if reserve else \
             "Beyond fuel it brings maintenance, tax and inspection costs. Shall we set aside a little from payday?"
         add("new_car", 80, "Congrats on the car!", cost, "car_insurance", sales=car.get("insured_at") not in (None, "KBC"))
-    if f("life_event_new_baby"):
+    if f("life_event_new_baby") and household_confirmed(twin):  # production boundary: never on an inferred birth
         add("new_baby", 85, "Welcome to your little one", "We've prepared what changes now: childcare costs, hospital cover and child benefit.", "family", sales=True)
     if f("life_event_moved"):
         add("moved", 75, "Settled in?", "Your new address, energy contract and home insurance — we've listed what's left to arrange.", "home", sales=True)

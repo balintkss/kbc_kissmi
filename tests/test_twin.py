@@ -78,9 +78,16 @@ def test_lotte_payday_plan_lands_on_a_weekday(persona):
 
 
 def test_julien_new_baby_drives_hospital_insurance(persona):
+    """Production boundary: an inferred birth never drives family content; the customer's confirmation does."""
+    from twin.feedback import apply_feedback
     t = persona(JULIEN)
     assert "life_event_new_baby" in facts(t)
-    block = page(t, "family")
+    unconfirmed = page(t, "family")
+    assert unconfirmed["highlight"]["id"] != "hospital_insurance"
+    assert not any(w in unconfirmed["highlight"]["reason"].lower() for w in ("baby", "born", "birth", "hospital"))
+    assert "new_baby" not in {m["kind"] for part in ("push", "feed") for m in moments(t)[part]}
+    confirmed = apply_feedback(t, [("life_event_new_baby", 1, None)])
+    block = page(confirmed, "family")
     assert block["personalized"] and block["highlight"]["id"] == "hospital_insurance"
     assert "life_event_new_baby" in {b["key"] for b in block["highlight"]["because"]}
 
@@ -321,7 +328,9 @@ def test_demo_texts_use_friendly_dates(persona):
     assert push["salary_plan"]["body"].startswith("€2,850 arrives on Fri 23 Oct. Bills €1,458")
     assert lotte["plan"]["payday"] == "2026-10-23"  # the structured field stays ISO
     assert "You bought your car on 13 Jun 2026 with your own savings" in page(lotte, "car_loan")["highlight"]["reason"]
-    assert "(born around 21 Jul 2026)" in page(persona(JULIEN), "family")["highlight"]["reason"]
+    from twin.feedback import apply_feedback  # family texts only after the customer confirms (production boundary)
+    julien = apply_feedback(persona(JULIEN), [("life_event_new_baby", 1, None)])
+    assert "(born around 21 Jul 2026)" in page(julien, "family")["highlight"]["reason"]
     assert page(persona(EMMA), "home")["highlight"]["reason"].startswith("You moved on 18 Aug 2026:")
 
 

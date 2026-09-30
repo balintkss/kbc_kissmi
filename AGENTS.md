@@ -237,6 +237,22 @@ After a customer rejects a fact that shaped the plan, the plan is recomputed on 
 - A rejected fact immediately stops driving highlights, moments and Kate, **and the payday plan is recalculated** (reserves, fuel, savings). Refetch `/twin`, `/plan`, `/moments` (`/moments-plus`), `/experience/*` and the foresight screens (`/forecast`, `/payday-sorter`, `/self-employed`) afterwards.
 - Feedback persists in the local DB. To reset a persona locally: `sqlite3 data/kbc_twin.db "DELETE FROM twin_feedback WHERE customer_id=1"`.
 
+### Confirmation gate on every personalized `/api/experience/*` block (read this before building product pages)
+- `commercial_ok: false` + `needs_confirmation: [{"fact": "has_car", "question": "We noticed 10 fuel payments, car bought 13 Jun 2026 for €11,500, insured at Ethias. Is that right?"}]` when the highlight rests only on *inferred* facts. **UI:** show the question with "Yes, that's right" / "No" buttons (they call `POST /api/me/facts/{fact}/feedback` with `correct: true/false`), and only show the buy/apply CTA once `commercial_ok` is true. Refetch the block after answering.
+- `commercial_ok: true` and no `needs_confirmation` once every supporting fact is confirmed.
+- **Family content is gated (production boundary):** an inferred `life_event_new_baby`/`children` never produces baby/birth/hospital wording. Julien's `family` page shows family liability for his dog until he confirms `life_event_new_baby` (feedback `correct: true`); then it highlights hospitalisation insurance and the `new_baby` moment appears.
+
+### Life moments & gaps (auth): `api/routes_life.py`
+Include these via `/api/me/moments-plus` on the app home (kinds `life_checklist`, `coverage_gap`, `benefit_hint`, `turning_25`, `household_change_prompt`); a life checklist replaces the older single-event message for the same event.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/me/life-checklists` | `{as_of, intro, checklists[{kind, id, event, fact, title, date, done, total, left, summary, items[{id, label, status: done\|todo\|unknown, evidence{text, tx_ids}, topic}]}], household_prompt}` — e.g. Emma: "3 of 5 things done for your move — 2 left" |
+| `GET /api/me/coverage-gaps` | `{as_of, support_first, gaps[{id, kind, severity: essential\|recommended\|nice-to-have, title, why, because[], topic, sales}], household_prompt}` — Lotte: `car_insured_elsewhere` is `kind: "compare"` ("Not a gap…"), not a gap. Under money stress only essential gaps |
+| `GET /api/me/benefits` | `{as_of, region, note, benefits[{id, title, body, check, region, source, source_name, because[], topic}], turning_25, household_prompt}` — every hint says "Check your eligibility" and links an official `source` (show it) |
+
+`household_prompt` (non-null until the customer confirms a household change): `{"kind": "household_change_prompt", "title": "Has your household changed?", "body": "Tell us only if you want KBC to take it into account.", "cta": "Review what KBC knows about me", "sales": false}` → link it to the glass-box screen.
+
 ### Money foresight (auth): `api/routes_foresight.py`
 Warn **before** the problem and act only with approval. Customer token only (ops tokens get 401), no customer id anywhere, feedback-applied like `/plan` (a rejected fact changes these too). Every customer-facing `message` / `body` is pre-formatted English with friendly dates: render it as text.
 
