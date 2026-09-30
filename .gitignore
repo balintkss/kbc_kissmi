@@ -11,3 +11,4 @@ web/.vite/
 *.local
 .env.*
 !.env.example
+.claude/
