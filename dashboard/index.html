@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="light dark">
+  <title>Twin Ops View</title>
+  <link rel="stylesheet" href="/ops/dashboard.css">
+  <script src="/ops/dashboard.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <h1>Digital Twin · Ops &amp; Advisor view <span class="brand-note">· concept prototype, synthetic data</span></h1>
+      </div>
+      <div class="session" id="session" hidden>
+        <span class="whoami" id="whoami"></span>
+        <button type="button" class="btn ghost" id="logout">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="login card" id="login-view" aria-labelledby="login-title">
+      <h2 id="login-title">Advisor sign-in</h2>
+      <p class="muted">Population dashboard and advisor drill-down over 5,000 synthetic digital twins.
+        Every customer you open is written to the audit log.</p>
+      <form id="login-form" method="post" autocomplete="off" novalidate>
+        <label class="field">
+          <span>Username</span>
+          <input id="username" name="username" autocomplete="username" required maxlength="40" spellcheck="false" autocapitalize="off">
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="128">
+        </label>
+        <button type="submit" class="btn primary" id="login-button">Sign in</button>
+        <p class="form-error" id="login-error" role="alert"></p>
+      </form>
+    </section>
+
+    <div id="app" hidden>
+      <nav class="tabs" aria-label="Views">
+        <button type="button" class="tab" id="tab-population" aria-pressed="true">Population</button>
+        <button type="button" class="tab" id="tab-advisor" aria-pressed="false">Advisor drill-down</button>
+      </nav>
+
+      <section id="view-population" aria-label="Population overview">
+        <p class="status" id="overview-status" role="status">Loading the population…</p>
+        <div class="kpis" id="kpis"></div>
+        <div class="scale card" id="scale"></div>
+        <div class="grid">
+          <article class="card panel">
+            <header><h2>Fact coverage</h2><p class="muted">Customers with each inferred fact. Click a row to list them.</p></header>
+            <div id="coverage" class="barlist"></div>
+          </article>
+          <article class="card panel">
+            <header><h2>Life events · last 90 days</h2><p class="muted" id="events-sub"></p></header>
+            <div id="events" class="barlist"></div>
+          </article>
+          <article class="card panel">
+            <header><h2>Moments across the population</h2><p class="muted">Share of each moment pushed, parked in the feed or held back. Max 2 pushes per customer.</p></header>
+            <div id="moments"></div>
+          </article>
+          <article class="card panel">
+            <header><h2>Opportunities</h2><p class="muted">Counts only. Customers under money stress are not approached.</p></header>
+            <div id="opportunities"></div>
+          </article>
+          <article class="card panel wide">
+            <header><h2>One highlight per topic</h2><p class="muted">Which variant each customer's page highlights. Personalisation, not one-size-fits-all.</p></header>
+            <div id="highlights" class="highlights"></div>
+          </article>
+        </div>
+        <p class="footnote" id="computed"></p>
+      </section>
+
+      <section id="view-advisor" aria-label="Advisor drill-down" hidden>
+        <div class="card framing">
+          <h2>Before the meeting</h2>
+          <p>The advisor sees the same twin the customer sees in the app, including their own corrections.
+            The customer never has to repeat themselves. Every customer listed or opened here is logged.</p>
+        </div>
+        <form class="card filters" id="filter-form" novalidate>
+          <label class="field">
+            <span>Has fact</span>
+            <select id="filter-fact"><option value="">Any</option></select>
+          </label>
+          <label class="field">
+            <span>Life event (last 90 days)</span>
+            <select id="filter-event"><option value="">Any</option></select>
+          </label>
+          <label class="field narrow">
+            <span>Show</span>
+            <select id="filter-limit">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+            </select>
+          </label>
+          <button type="submit" class="btn primary">Find customers</button>
+        </form>
+        <div class="advisor">
+          <aside class="card results" aria-label="Matching customers">
+            <p class="status" id="results-status">Pick a filter and press “Find customers”. Demo personas come first.</p>
+            <ul id="results" class="result-list"></ul>
+          </aside>
+          <div id="customer" class="customer" aria-live="polite"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="footer wrap">
+    Concept prototype on synthetic data. Not an official bank product; product names and texts are illustrative.
+  </footer>
+</body>
+</html>

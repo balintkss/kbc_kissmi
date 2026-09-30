@@ -89,6 +89,7 @@ twin/catalog.py          moments(twin)      → push / feed / held-back messages
         │
         ▼
 api/                     FastAPI, one API for all channels: login, experience blocks, twin, plan, moments, feedback
+        │                api/ops.py + twin/population.py + dashboard/ → /ops: population dashboard & advisor drill-down (ops role, audited)
         │
         ▼
 app + website            render the same experience blocks (to do)
@@ -116,6 +117,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m twin.evaluate             # accuracy vs. hidden truth
 .venv/bin/python -m twin.engine --customer 1  # print Lotte's twin as JSON
 .venv/bin/python -m api.seed_credentials      # logins; demo persona passwords -> data/demo_credentials.txt (git-ignored)
+.venv/bin/python -m api.seed_ops              # ops/advisor login 'advisor' -> data/ops_credentials.txt (git-ignored); dashboard at /ops
 cp .env.example .env                          # then fill in OPENAI_API_KEY and a random TWIN_SECRET
 .venv/bin/uvicorn api.main:app --reload       # API docs at http://localhost:8000/api/docs
 ```
@@ -132,6 +134,11 @@ cp .env.example .env                          # then fill in OPENAI_API_KEY and 
 | `GET /api/me/chat` | required | Kate's opener (top proactive moment) + chat history |
 | `POST /api/me/chat` | required | `{message}` → Kate's answer + which tools she used. Rate-limited. |
 | `POST /api/me/facts/{fact}/feedback` | required | `{correct, note}` — the customer corrects their twin; rejected facts stop driving recommendations |
+| `GET /ops` | – (login in page) | Ops & advisor dashboard (static, same origin, strict CSP; token kept in memory only) |
+| `POST /api/ops/login` | – | `{username, password}` → **ops-role** token (1 h). Rate-limited per IP and per username. Customer tokens never work on `/api/ops/*`, ops tokens never work on `/api/me/*` |
+| `GET /api/ops/overview` | ops | Population aggregates, counts only: coverage, life events (90 d), pushes / held back, opportunities, highlight mix, 2.3M scale projection |
+| `GET /api/ops/customers?has=<fact>&event=<type>&limit=1-50` | ops | Advisor picker (demo personas first). Every customer listed is written to `ops_audit` |
+| `GET /api/ops/customers/{id}` | ops | Advisor drill-down: the same twin the customer sees (facts, plan, one highlight per topic, moments incl. held back). **Every access is logged** in `ops_audit(at, username, customer_id, action)` |
 
 The generator is seeded, so everyone gets the same database.
 

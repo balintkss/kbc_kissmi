@@ -40,22 +40,39 @@ def _unb64(text: str) -> bytes:
     return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
-def issue_token(customer_id: int) -> str:
-    payload = _b64(json.dumps({"sub": customer_id, "exp": int(time.time()) + TOKEN_TTL}).encode())
+# Every token is bound to exactly one role. Customer ids and ops usernames live in different
+# namespaces, so a token only ever works for the role it was issued for.
+ROLES = ("customer", "ops")
+
+
+def issue_token(subject, role: str = "customer") -> str:
+    """Signed token: subject is a customer id (role "customer") or an ops username (role "ops")."""
+    if role not in ROLES:
+        raise ValueError("unknown role")
+    sub = int(subject) if role == "customer" else str(subject)
+    payload = _b64(json.dumps({"sub": sub, "role": role, "exp": int(time.time()) + TOKEN_TTL}).encode())
     sig = _b64(hmac.new(SECRET, payload.encode(), hashlib.sha256).digest())
     return f"{payload}.{sig}"
 
 
-def read_token(token: str):
-    """Return the customer id from a valid, unexpired token, else None."""
+def read_token(token: str, role: str = "customer"):
+    """Return the subject of a valid, unexpired token issued for exactly `role`, else None.
+
+    role "customer" -> the customer id (int); role "ops" -> the ops username (str).
+    """
+    if role not in ROLES:
+        return None
     try:
         payload, sig = token.split(".")
         expected = _b64(hmac.new(SECRET, payload.encode(), hashlib.sha256).digest())
         if not hmac.compare_digest(sig, expected):
             return None
         data = json.loads(_unb64(payload))
-        if data["exp"] < time.time():
+        if not isinstance(data, dict) or data.get("role") != role or data["exp"] < time.time():
             return None
-        return int(data["sub"])
-    except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+        sub = data["sub"]
+        if role == "customer":
+            return sub if type(sub) is int and sub > 0 else None
+        return sub if isinstance(sub, str) and sub else None
+    except (ValueError, KeyError, TypeError, AttributeError, json.JSONDecodeError):
         return None

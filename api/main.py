@@ -94,7 +94,7 @@ def _customer_from_header(authorization):
     if not authorization:
         return None
     scheme, _, token = authorization.partition(" ")
-    cid = read_token(token) if scheme.lower() == "bearer" else None
+    cid = read_token(token, role="customer") if scheme.lower() == "bearer" else None  # ops tokens never pass
     if cid is None:
         raise HTTPException(401, "Invalid or expired session", headers={"WWW-Authenticate": "Bearer"})
     return cid
@@ -217,3 +217,11 @@ def chat(body: ChatIn, request: Request, cid=Depends(current_customer), con=Depe
         if e.__class__.__module__.startswith("openai"):
             raise HTTPException(503, "Kate is unavailable right now") from None
         raise
+
+
+# ---------------------------------------------------------------------- ops & advisor channel (api/ops.py)
+
+from api.ops import pages as ops_pages, router as ops_router  # noqa: E402  (ops role tokens only)
+
+app.include_router(ops_router)   # /api/ops/*
+app.include_router(ops_pages)    # /ops dashboard (static, same origin)
