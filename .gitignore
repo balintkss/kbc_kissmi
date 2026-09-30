@@ -5,3 +5,9 @@ __pycache__/
 .DS_Store
 data/*.txt
 .pytest_cache/
+node_modules/
+web/dist/
+web/.vite/
+*.local
+.env.*
+!.env.example

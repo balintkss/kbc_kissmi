@@ -2,7 +2,7 @@
 
 ## The commercial thesis
 
-**KBC Digital Twin productises the parts of a great private-banking relationship that can be safely scaled: a shared understanding of the customer’s financial reality, regular meaningful dialogue, a clear goal and a relevant next step.**
+**Kate+ productises the parts of a great private-banking relationship that can be safely scaled: a shared understanding of the customer’s financial reality, regular meaningful dialogue, a clear goal and a relevant next step. The Digital Twin remains its explainable memory layer.**
 
 This is not a claim that every retail customer receives a human private banker. It is a promise that every customer can receive the *preparation, continuity and clarity* of that relationship through Kate, KBC Mobile and kbc.be — with a human adviser available for consequential choices.
 

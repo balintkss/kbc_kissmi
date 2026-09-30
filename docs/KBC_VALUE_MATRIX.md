@@ -1,6 +1,6 @@
-# KBC Digital Twin: Product, Market and Value Matrix
+# Kate+: Product, Market and Value Matrix
 
-Presentation positioning: **KBC Digital Twin is the customer-governed financial memory for Kate.**
+Presentation positioning: **Kate+ is KBC’s customer-governed financial co-pilot, powered by the Digital Twin memory layer.**
 
 It is not another chatbot, a generic next-best-offer engine, or a claim that KBC sees a customer's whole life. Kate remains the interface. The Twin is the explainable decision layer used by Kate, KBC Mobile, kbc.be and advisers.
 

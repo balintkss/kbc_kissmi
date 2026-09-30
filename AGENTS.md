@@ -6,7 +6,7 @@
 ## 1. Project in 5 lines
 
 1. **Challenge (KBC):** *"a scalable personalization approach that fundamentally strengthens the relationship between KBC and its customers"*, for 2.3M customers.
-2. **Idea:** every customer gets a living **digital twin**, a customer-governed picture of their financial life inferred from non-sensitive transaction patterns (car, move, new job, payday, bills...), where each fact has a confidence score and the transactions that support it.
+2. **Product / idea:** **Kate+** is the customer-facing financial co-pilot. Its living **digital twin** is a customer-governed picture of financial life inferred from non-sensitive transaction patterns (car, move, new job, payday, bills...), where each fact has a confidence score and supporting transactions.
 3. **Promise to the customer:** *"KBC helps me without making me repeat myself — and I stay in control."*
 4. **Push + pull:** proactive moments (payday plan, life events; sales are held back under money stress) plus **Kate**, a GPT-4.1 chat that uses the twin as memory and tools for every number.
 5. **Glass box:** the customer sees what KBC believes and can correct it ("That's right" / "That's not me").

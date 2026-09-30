@@ -1,10 +1,10 @@
-# KBC Digital Twin — "It already knows. I don't have to explain."
+# Kate+ — KBC’s customer-controlled financial co-pilot
 
 > Tectonic Hackathon · KBC challenge: *a scalable personalization approach that fundamentally strengthens the relationship between KBC and its customers.*
 
 ## The idea in one line
 
-Every customer gets a **living digital twin** — a picture of their life inferred from what they already do with their bank — so that every channel (app, website, advisor, notifications) knows the context and **never makes the customer explain themselves again**.
+**Kate+** is the customer-facing co-pilot. Its **Digital Twin** is the explainable memory layer underneath: a customer-controlled picture of financial context that lets every channel (app, website, adviser, notifications) help without making the customer explain themselves again.
 
 > **Production boundary:** this repository is a synthetic proof of the pipeline. A real KBC rollout would infer only non-sensitive financial context, let the customer confirm a neutral household change, and never infer health, mental-health, pregnancy or other special-category data from transactions. No inferred fact can drive marketing, pricing, eligibility or an automated financial decision without the customer’s explicit step and the applicable KBC process.
 
@@ -129,6 +129,9 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 cp .env.example .env                          # then fill in OPENAI_API_KEY and a random TWIN_SECRET
 .venv/bin/uvicorn api.main:app --reload       # API docs at http://localhost:8000/api/docs
 
+# in a second terminal — customer app + public product view
+cd web && npm install && npm run dev           # Node 20.19+ / 22.12+ · http://localhost:5173 (proxies /api to :8000)
+
 # tests (no real OpenAI calls; DB tests are skipped until the steps above have run)
 .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest -q
 ```
@@ -190,7 +193,7 @@ The generator is seeded, so everyone gets the same customers and transactions. P
 - [x] Money-stress demo persona (5, Jens): sales held back, support first
 - [x] Money foresight: overdraft early warning, payday sorter (approve-to-act, simulated), self-employed reserve
 - [x] Test suite: 492 tests, all passing (`python -m pytest -q`)
-- [ ] App + website frontends (`web/`, our frontend teammate)
+- [x] App + website frontends (`web/`): customer login, payday plan, product comparison, glass box with fact correction, Kate and support-first state
 - [ ] Aikido scan before/after, demo video
 
 Product names follow KBC's product families, but descriptions and rates in `twin/catalog.py` are illustrative placeholders, not real KBC terms.

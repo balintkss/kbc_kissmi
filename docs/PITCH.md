@@ -1,4 +1,4 @@
-# Pitch kit: KBC Digital Twin
+# Pitch kit: Kate+ powered by the KBC Digital Twin
 
 > *"KBC helps me without making me repeat myself — and I stay in control."*
 
@@ -10,7 +10,7 @@ Concept prototype on synthetic data (5,000 customers, 2.16M transactions). Figur
 
 **≈ 50 words**
 
-> KBC Digital Twin gives every customer a living, explainable picture of their financial life (car, move, new job, payday, bills), inferred from non-sensitive transaction patterns KBC already has. Every channel reads the same twin: one highlighted next step with the reason, a payday plan, Kate answering in context, and no sales under money stress.
+> Kate+ gives every customer a living, explainable picture of their financial life (car, move, new job, payday, bills), inferred from non-sensitive transaction patterns KBC already has. Its Digital Twin memory gives every channel one highlighted next step with the reason, a payday plan, answers in context and no sales under money stress.
 
 **≈ 100 words**
 
@@ -22,7 +22,7 @@ Concept prototype on synthetic data (5,000 customers, 2.16M transactions). Figur
 
 ## 2. 30-second elevator pitch (≈ 80 words, about 30 s spoken)
 
-> Kate already talks to millions of KBC customers, yet every channel still starts from zero. We built the layer underneath: a digital twin per customer, inferred from transactions KBC already has. It knows Lotte bought a used car in June and insures it elsewhere. So the website shows her one insurance with the reason, payday brings a plan, not an offer, and Kate answers "can I afford this trip?" without a single question. And Lotte can see and correct all of it.
+> Kate already talks to millions of KBC customers, yet every channel still starts from zero. **Kate+** is the product layer that changes that, powered by a digital twin per customer inferred from permitted transaction patterns. It knows Lotte bought a used car in June and insures it elsewhere. So the website shows her one insurance with the reason, payday brings a plan, not an offer, and Kate+ answers “can I afford this trip?” without a single question. And Lotte can see and correct all of it.
 
 ## 3. The challenge's five questions
 
