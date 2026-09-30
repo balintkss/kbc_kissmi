@@ -24,6 +24,9 @@ Team: **A** = backend (data, twin, recommender, API, Kate; built with Claude). *
 |---|---|---|
 | `README.md` | Pitch, results, run instructions, status | Both. B adds the frontend run command and status |
 | `SUBMISSION_CHECKLIST.md` | Pre-submit checklist (repo public, secrets, Aikido, video) | Both |
+| `docs/PITCH.md`, `docs/DEMO_SCRIPT.md` | Builderbase texts, elevator pitch, judge Q&A, scale & LLM cost numbers; 2:45 shot-by-shot video script + demo reset SQL | Both. Read before building demo screens |
+| `twin/feedback.py` | Applies customer corrections to a twin (marks facts, recomputes the plan) | **A: do not edit** |
+| `twin/benchmark.py` | Read-only speed benchmark behind the 2.3M projection | A |
 | `docs/DATABASE_HANDOFF.md` | Database and API connection contract for humans and coding agents | Read before any database or frontend integration |
 | `AGENTS.md`, `CLAUDE.md`, `.cursor/rules/project.mdc` | This guide and its pointers | Both |
 | `data/generate_db.py` | Seeded synthetic Belgian bank: 5K customers, ~2.16M transactions, demo personas 1–4 | **A: do not edit** |
@@ -166,6 +169,7 @@ Gotchas:
  "free_to_spend": 648, "free_per_week": 151, "heads_up": []}
 ```
 For Marc (irregular income): `payday: null`, `income_kind: "irregular"`, `income_note` is set, and **`free_to_spend` / `free_per_week` are negative** (-388 / -90). Note the key is `for_` (with the underscore).
+After a customer rejects a fact that shaped the plan, the plan is recomputed on the fly and carries `"adjusted_for_feedback": ["has_car"]`. For example, Lotte rejecting her car drops the €80 car reserve and the €187 fuel estimate, taking `free_per_week` from 151 to 213. Show a small "updated after your correction" note when this key is present.
 
 ### GET /api/me/moments (auth)
 ```json
@@ -209,7 +213,7 @@ For Marc (irregular income): `payday: null`, `income_kind: "irregular"`, `income
 ```
 - `note` is optional, max 280 characters. An unknown fact for this customer gives 404.
 - **The latest feedback wins**: "That's right" after "That's not me" undoes it.
-- A rejected fact immediately stops driving highlights, moments and Kate. Refetch `/twin`, `/moments` and `/experience/*` afterwards.
+- A rejected fact immediately stops driving highlights, moments and Kate, **and the payday plan is recalculated** (reserves, fuel, savings). Refetch `/twin`, `/plan`, `/moments` and `/experience/*` afterwards.
 - Feedback persists in the local DB. To reset a persona locally: `sqlite3 data/kbc_twin.db "DELETE FROM twin_feedback WHERE customer_id=1"`.
 
 ## 5. Screens to build (priority order for the demo)
@@ -268,7 +272,8 @@ export async function api(path, { method = "GET", body, auth = true } = {}) {
 
 ## 8. Known limitations (design around them)
 
-- **The plan is precomputed.** Rejecting a fact (e.g. the car) removes it from highlights and moments immediately, but `/api/me/plan` and the payday push body still include its reserve. Currently `twin.engine` doesn't read feedback, so rebuilding doesn't fix it either.
+**In progress on the backend (A), don't work around these yourself:** the ops/advisor dashboard (`/ops`, `api/ops.py`), a pytest suite (`tests/`), counting only *failed* logins in the rate limit, a money-stress demo persona with its own login, validating `channel`, and a 503 instead of a 500 for chat without a key. This section is updated when they land.
+
 - **Kate is slow.** Replies take a few seconds: show a typing indicator and block double-send. Watch the rate limit of 20 messages/min.
 - **Today is 2026-09-30** in the data (`AS_OF`). All dates are ISO strings (`2026-10-23`), so format them in the UI. The text inside moment bodies and reasons is pre-formatted English with ISO dates.
 - **Amounts** are EUR numbers, where negative means money out. The plan's `free_*` values can be negative (Marc).

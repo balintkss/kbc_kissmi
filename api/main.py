@@ -20,6 +20,7 @@ from api.security import issue_token, read_token, verify_password
 from twin.assistant import Assistant
 from twin.catalog import CATALOG
 from twin.engine import DB
+from twin.feedback import apply_feedback
 from twin.recommender import moments, page
 
 app = FastAPI(title="KBC Digital Twin API", docs_url="/api/docs", openapi_url="/api/openapi.json")
@@ -117,15 +118,10 @@ def load_twin(con, cid):
     if not row:
         raise HTTPException(404, "No twin built for this customer yet")
     twin = json.loads(row[0])
-    # Customer corrections win over inference: a fact they rejected is never used again.
-    for fact, correct, note in con.execute(
-            "SELECT fact, correct, note FROM twin_feedback WHERE customer_id = ? ORDER BY created_at", (cid,)):
-        if fact in twin["facts"]:
-            twin["facts"][fact]["rejected_by_customer"] = not correct
-            twin["facts"][fact]["confirmed_by_customer"] = bool(correct)
-            if note:
-                twin["facts"][fact]["customer_note"] = note
-    return twin
+    # Customer corrections win over inference: a rejected fact is never used again and no longer shapes the plan.
+    rows = con.execute(
+        "SELECT fact, correct, note FROM twin_feedback WHERE customer_id = ? ORDER BY created_at", (cid,)).fetchall()
+    return apply_feedback(twin, rows)
 
 
 def _evidence(con, cid, tx_ids):

@@ -149,7 +149,7 @@ The generator is seeded, so everyone gets the same database.
 - [x] Evaluation against ground truth
 - [x] Recommender: highlight-one pages + push moments with silence rules
 - [x] API with login, experience blocks, glass-box twin, plan, moments
-- [x] Customer correction of facts ("that's not right") — note: the payday plan is precomputed, so a rejected car still shows its reserve until the twin is rebuilt
+- [x] Customer correction of facts ("that's not right") — corrections immediately adjust the payday plan (car/pet reserves, fuel, savings) without rebuilding the twin (`twin/feedback.py`)
 - [x] Kate chat over the twin ("pull") with grounded tools, in the customer's language (nl/fr/en)
 - [ ] App + website frontends, ops dashboard for the 5K population
 - [ ] Aikido scan before/after, demo video
