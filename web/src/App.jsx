@@ -28,6 +28,7 @@ const FACT_LABELS = {
 
 const NAV = [
   ["home", "Today", "home"],
+  ["foresight", "Plan ahead", "chart"],
   ["product", "Explore", "compass"],
   ["twin", "Financial picture", "spark"],
   ["kate", "Ask Kate", "chat"],
@@ -82,6 +83,7 @@ function Icon({ name, size = 18 }) {
     calendar: <><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3v4M16 3v4M4 10h16" /></>,
     lock: <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>,
     warning: <><path d="m12 3 9 17H3L12 3Z" /><path d="M12 9v4M12 17h.01" /></>,
+    chart: <><path d="M4 19V5M4 19h16" /><path d="m7 15 4-4 3 2 5-6" /><circle cx="7" cy="15" r=".7" fill="currentColor" /><circle cx="11" cy="11" r=".7" fill="currentColor" /><circle cx="14" cy="13" r=".7" fill="currentColor" /><circle cx="19" cy="7" r=".7" fill="currentColor" /></>,
   };
   return <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -111,15 +113,18 @@ function App() {
   }, []);
 
   const loadCustomer = useCallback(async (activeTopic = topic) => {
-    const [me, moments, plan, twin, chat, nextExperience] = await Promise.all([
+    const [me, moments, plan, twin, chat, nextExperience, forecast, sorter, selfEmployed] = await Promise.all([
       api("/me"),
-      api("/me/moments"),
+      api("/me/moments-plus"),
       api("/me/plan"),
       api("/me/twin?with_evidence=true"),
       api("/me/chat"),
       api(`/experience/${encodeURIComponent(activeTopic)}?channel=app`),
+      api("/me/forecast"),
+      api("/me/payday-sorter"),
+      api("/me/self-employed"),
     ]);
-    setData({ me, moments, plan, twin, chat });
+    setData({ me, moments, plan, twin, chat, forecast, sorter, selfEmployed });
     setExperience(nextExperience);
   }, [topic]);
 
@@ -229,12 +234,40 @@ function App() {
     }
   };
 
+  const approveSorter = async (pots) => {
+    setBusy(true);
+    try {
+      const result = await api("/me/payday-sorter/approve", { method: "POST", body: { pots } });
+      await loadCustomer(topic);
+      setNotice(result.message || "Your simulated payday plan is active. Nothing has moved.");
+    } catch (error) {
+      await loadCustomer(topic).catch(() => {});
+      setNotice(error?.status === 422 ? "That proposal changed. Please review the latest payday plan." : friendlyError(error, "approve this payday plan"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revokeSorter = async () => {
+    setBusy(true);
+    try {
+      const result = await api("/me/payday-sorter/revoke", { method: "POST" });
+      await loadCustomer(topic);
+      setNotice(result.message || "The simulated payday plan is no longer active.");
+    } catch (error) {
+      setNotice(friendlyError(error, "stop this payday plan"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const main = useMemo(() => {
     if (!session || !data) return <PublicCatalogue experience={publicExperience} topics={topics} topic={topic} onTopic={selectTopic} busy={busy} />;
     if (view === "product") return <ProductComparison topic={topic} publicExperience={publicExperience} experience={experience} topics={topics} onTopic={selectTopic} busy={busy} />;
+    if (view === "foresight") return <Foresight forecast={data.forecast} sorter={data.sorter} selfEmployed={data.selfEmployed} onApprove={approveSorter} onRevoke={revokeSorter} onSimulateTopUp={() => setNotice("Simulation only — no money moved. In a real service, Kate+ would ask for your confirmation before any transfer.")} busy={busy} />;
     if (view === "twin") return <FinancialPicture twin={data.twin} plan={data.plan} onFeedback={giveFeedback} busy={busy} />;
     if (view === "kate") return <Kate chat={data.chat} onSend={sendChat} busy={busy} />;
-    return <Home me={data.me} moments={data.moments} plan={data.plan} topics={topics} onTopic={selectTopic} onView={setView} />;
+    return <Home me={data.me} moments={data.moments} plan={data.plan} forecast={data.forecast} topics={topics} onTopic={selectTopic} onView={setView} />;
   }, [busy, data, experience, publicExperience, session, topic, topics, view]);
 
   return (
@@ -308,18 +341,21 @@ function SideNav({ view, onView }) {
   </nav>;
 }
 
-function Home({ me, moments, plan, topics, onTopic, onView }) {
+function Home({ me, moments, plan, forecast, topics, onTopic, onView }) {
   const primary = moments?.push?.[0];
   const secondary = moments?.push?.[1];
+  const feed = moments?.feed || [];
   const tight = typeof plan?.free_per_week === "number" && plan.free_per_week < 0;
   return <section className="home-view">
     <div className="home-head"><div><p className="eyebrow">Your private-banker preparation, at retail scale</p><h1>Good evening, {me?.first_name}.</h1><p>Your financial context is ready when you are.</p></div><button type="button" className="reason-button" onClick={() => onView("twin")}><Icon name="eye" size={16} /> What Kate+ remembers <Icon name="chevron" size={15} /></button></div>
     {tight && <SupportBanner onView={onView} />}
     <div className="home-grid">
       <PaydayPlan plan={plan} onView={onView} />
-      <section className="trust-card"><div className="trust-card-top"><span className="fine-label">YOUR CONTROL</span><Icon name="shield" /></div><h2>Every recommendation has a reason.</h2><p>See the evidence, correct a fact, and Kate+ updates the plan across every channel.</p><button type="button" className="text-button" onClick={() => onView("twin")}>View financial picture <Icon name="arrow" size={15} /></button></section>
+      <SafeSpendMeter forecast={forecast} compact onView={onView} />
     </div>
-    <section className="next-section"><div className="section-heading"><div><p className="eyebrow">Your next steps</p><h2>Useful, not noisy.</h2></div><span>{moments?.push?.length || 0} of 2 priority moments</span></div><div className="moment-grid">{primary && <MomentCard moment={primary} primary onTopic={onTopic} />}{secondary && <MomentCard moment={secondary} onTopic={onTopic} />}{!primary && <Empty label="Your plan has no urgent moments right now." />}</div></section>
+    <section className="trust-card home-trust"><div className="trust-card-top"><span className="fine-label">YOUR CONTROL</span><Icon name="shield" /></div><div><h2>Every recommendation has a reason.</h2><p>See the evidence, correct a fact, and Kate+ updates the plan across every channel.</p></div><button type="button" className="text-button" onClick={() => onView("twin")}>View financial picture <Icon name="arrow" size={15} /></button></section>
+    <section className="next-section"><div className="section-heading"><div><p className="eyebrow">Your next steps</p><h2>Useful, not noisy.</h2></div><span>{moments?.push?.length || 0} of 2 priority moments</span></div><div className="moment-grid">{primary && <MomentCard moment={primary} primary onTopic={onTopic} onView={onView} />}{secondary && <MomentCard moment={secondary} onTopic={onTopic} onView={onView} />}{!primary && <Empty label="Your plan has no urgent moments right now." />}</div></section>
+    {feed.length > 0 && <section className="next-section feed-section"><div className="section-heading"><div><p className="eyebrow">Keep in view</p><h2>Context that can wait.</h2></div></div><div className="moment-grid">{feed.map((moment) => <MomentCard key={`${moment.kind}-${moment.title}`} moment={moment} onTopic={onTopic} onView={onView} />)}</div></section>}
     <section className="explore-section"><div className="section-heading"><div><p className="eyebrow">Explore the same catalogue, with context</p><h2>Start where it matters to you.</h2></div></div><div className="topic-row">{topics.map((item) => <button type="button" className="topic-button" key={item.id} onClick={() => onTopic(item.id)}><span>{item.title}</span><Icon name="arrow" size={16} /></button>)}</div></section>
   </section>;
 }
@@ -334,9 +370,81 @@ function PaydayPlan({ plan, onView }) {
   return <section className={`payday-card ${negative ? "under-pressure" : ""}`}><div className="payday-meta"><span className="fine-label">YOUR NEXT PAYDAY</span><Icon name="calendar" /></div><h2>{plan.payday ? `${money(plan.income)} arrives ${date(plan.payday)}` : "Your quiet month plan"}</h2><p>{plan.income_note || "Bills, reserves and savings are considered before you spend."}</p><div className="plan-number"><span>{money(plan.free_per_week, { signed: true })}</span><small>{negative ? "short each week" : "free to spend each week"}</small></div><div className="plan-line"><span>Essential bills</span><b>{money(plan.bills_until_next_payday)}</b></div><div className="plan-line"><span>Set aside</span><b>{money(plan.reserve_total)}</b></div><button type="button" className="plan-link" onClick={() => onView("twin")}>See what shaped this plan <Icon name="arrow" size={15} /></button></section>;
 }
 
-function MomentCard({ moment, primary, onTopic }) {
+function SafeSpendMeter({ forecast, compact = false, onView }) {
+  if (!forecast) return <section className="safe-spend-card loading-card"><span className="fine-label">PLAN AHEAD</span><h2>Preparing your cash forecast.</h2></section>;
+  const horizon = forecast.payday ? `until ${date(forecast.payday)}` : "for the next 35 days";
+  return <section className={`safe-spend-card ${forecast.warning ? "needs-attention" : "on-track"}`}>
+    <div className="safe-spend-meta"><span className="fine-label">SAFE TO SPEND · PROJECTION</span><Icon name={forecast.warning ? "warning" : "chart"} /></div>
+    <div className="safe-spend-number"><span>{money(forecast.safe_to_spend_per_day)}</span><small>/ day</small></div>
+    <h2>{horizon}</h2>
+    <p>You usually spend about {money(forecast.typical_daily_spend)}/day. {forecast.warning ? "Your upcoming bills need attention." : "You are on track."}</p>
+    {!compact && forecast.message && <p className="forecast-message">{forecast.message}</p>}
+    <button type="button" className="plan-link" onClick={() => onView("foresight")}>{forecast.warning ? "See the heads-up" : "See projection"} <Icon name="arrow" size={15} /></button>
+  </section>;
+}
+
+function Foresight({ forecast, sorter, selfEmployed, onApprove, onRevoke, onSimulateTopUp, busy }) {
+  return <section className="foresight-view">
+    <div className="foresight-head"><div><p className="eyebrow">Plan ahead</p><h1>Know the pinch point before it arrives.</h1><p>This is a projection from your current balance, regular bills and typical daily spending — not a promise.</p></div><span className="projection-tag"><Icon name="eye" size={15} /> Projection, not a transfer</span></div>
+    {forecast?.warning && <aside className="forecast-warning"><Icon name="warning" /><div><span className="fine-label">HEADS-UP</span><h2>Your balance may dip below zero.</h2><p>{forecast.message}</p>{forecast.top_up && <button type="button" className="warning-button" onClick={onSimulateTopUp}>{forecast.top_up_from_savings ? `Review simulated ${money(forecast.top_up)} top-up` : "Review bill-spread simulation"} <Icon name="arrow" size={15} /></button>}</div></aside>}
+    <div className="foresight-grid">
+      <section className="forecast-card"><div className="forecast-summary"><div><span className="fine-label">SAFE TO SPEND</span><strong>{money(forecast?.safe_to_spend_per_day)}<small>/ day</small></strong><p>{forecast?.payday ? `until ${date(forecast.payday)}` : "for the next 35 days"}</p></div><div><span className="fine-label">USUAL DAILY SPEND</span><b>{money(forecast?.typical_daily_spend)}</b><p>with a {money(forecast?.floor)} floor</p></div></div><ForecastChart forecast={forecast} />{forecast?.adjusted_for_feedback?.length > 0 && <p className="adjusted-note"><Icon name="check" size={14} /> Updated after your correction.</p>}</section>
+      <PaydaySorter sorter={sorter} onApprove={onApprove} onRevoke={onRevoke} busy={busy} />
+    </div>
+    <SelfEmployedCard envelope={selfEmployed} />
+  </section>;
+}
+
+function ForecastChart({ forecast }) {
+  const points = (forecast?.series || []).filter((item) => typeof item.balance === "number" && Number.isFinite(item.balance));
+  if (!points.length) return <Empty label="Your projection is loading…" />;
+  const balances = points.map((item) => item.balance);
+  const min = Math.min(...balances, 0, typeof forecast?.floor === "number" ? forecast.floor : 0);
+  const max = Math.max(...balances, 0, typeof forecast?.floor === "number" ? forecast.floor : 0);
+  const range = max - min || 1;
+  const width = 620;
+  const height = 232;
+  const inset = { top: 22, right: 18, bottom: 34, left: 55 };
+  const x = (index) => inset.left + (index / Math.max(1, points.length - 1)) * (width - inset.left - inset.right);
+  const y = (value) => inset.top + ((max - value) / range) * (height - inset.top - inset.bottom);
+  const line = points.map((item, index) => `${x(index)},${y(item.balance)}`).join(" ");
+  const lowestIndex = forecast?.lowest?.date ? points.findIndex((item) => item.date === forecast.lowest.date) : -1;
+  const floorY = y(typeof forecast?.floor === "number" ? forecast.floor : 0);
+  const zeroY = y(0);
+  return <figure className="forecast-chart"><figcaption><span>Current-account balance</span><span>{date(points[0]?.date)} → {date(points.at(-1)?.date)}</span></figcaption><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Projected current-account balance, with a zero line and a safety floor"><line className="chart-grid" x1={inset.left} x2={width - inset.right} y1={floorY} y2={floorY} /><text x={6} y={floorY + 4}>{money(forecast?.floor)}</text><line className="chart-zero" x1={inset.left} x2={width - inset.right} y1={zeroY} y2={zeroY} /><text x={20} y={zeroY + 4}>€0</text><polyline className="chart-line" points={line} />{lowestIndex >= 0 && <><circle className="chart-low" cx={x(lowestIndex)} cy={y(points[lowestIndex].balance)} r="5" /><text className="chart-low-label" x={Math.min(width - 110, x(lowestIndex) + 8)} y={Math.max(18, y(points[lowestIndex].balance) - 10)}>{money(points[lowestIndex].balance, { signed: true })}</text></>}<text className="chart-start" x={inset.left} y={height - 9}>{date(points[0]?.date)}</text><text className="chart-end" x={width - inset.right} y={height - 9} textAnchor="end">{date(points.at(-1)?.date)}</text></svg><p><span className="chart-key line" /> Balance <span className="chart-key zero" /> €0 <span className="chart-key floor" /> {money(forecast?.floor)} floor</p></figure>;
+}
+
+function PaydaySorter({ sorter, onApprove, onRevoke, busy }) {
+  const [selected, setSelected] = useState([]);
+  useEffect(() => {
+    const active = sorter?.mandate?.pots?.map((pot) => pot.id);
+    setSelected(active || (sorter?.pots || []).filter((pot) => pot.approvable).map((pot) => pot.id));
+  }, [sorter]);
+  if (!sorter) return <section className="sorter-card loading-card"><span className="fine-label">PAYDAY SORTER</span><h2>Preparing your proposal.</h2></section>;
+  if (!sorter.available) return <section className="sorter-card"><span className="fine-label">PAYDAY SORTER</span><h2>No regular payday to sort yet.</h2><p>{sorter.message}</p><SimulationLabel /></section>;
+  const toggle = (id) => setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const activeNames = sorter.mandate?.pots?.map((pot) => pot.label).join(", ");
+  return <section className="sorter-card"><div className="sorter-heading"><div><span className="fine-label">PAYDAY SORTER</span><h2>{sorter.payday ? `Proposed for ${date(sorter.payday)}` : "When your next invoice lands"}</h2></div><Icon name="calendar" /></div><p className="sorter-message">{sorter.message}</p>{sorter.shortfall > 0 && <div className="shortfall"><Icon name="warning" size={15} /><b>{money(sorter.shortfall)} short</b><span>Bills come first.</span></div>}<div className="pot-list">{sorter.pots.map((pot) => <section className="pot-row" key={pot.id}><div className="pot-main"><div><b>{pot.label}</b>{pot.short > 0 && <span>{money(pot.short)} short</span>}</div><strong>{money(pot.amount)}</strong></div>{pot.items?.length > 0 && <details><summary>{pot.items.length} item{pot.items.length === 1 ? "" : "s"} included</summary><ul>{pot.items.map((item) => <li key={item}>{item}</li>)}</ul></details>}{pot.approvable ? <label className="pot-toggle"><input type="checkbox" checked={selected.includes(pot.id)} onChange={() => toggle(pot.id)} disabled={busy} /><span aria-hidden="true" /><em>Include in simulation</em></label> : <span className="stays-put">Stays on your account</span>}</section>)}</div><SimulationLabel />{sorter.mandate ? <div className="active-mandate"><div><span className="fine-label">ACTIVE SIMULATION</span><p>Active: {activeNames || "your selected pots"}</p></div><button type="button" className="outline-button" disabled={busy} onClick={onRevoke}>Stop</button></div> : <button type="button" className="primary-button sorter-approve" disabled={busy || selected.length === 0} onClick={() => onApprove(selected)}>Approve selected pots <Icon name="check" /></button>}</section>;
+}
+
+function SimulationLabel() {
+  return <p className="simulation-label"><Icon name="shield" size={14} /> Simulation — nothing moves without your approval</p>;
+}
+
+function SelfEmployedCard({ envelope }) {
+  if (!envelope?.applicable) return null;
+  const social = envelope.set_aside?.social_contributions_pct || 0;
+  const tax = envelope.set_aside?.income_tax_pct || 0;
+  const last = envelope.last_invoice;
+  return <section className="self-employed-card"><div className="self-employed-head"><div><p className="eyebrow">SELF-EMPLOYED GUIDE</p><h2>Set aside ≈ {number(envelope.set_aside?.total_pct)}% of every invoice.</h2><p>{envelope.message}</p></div><Icon name="chart" size={25} /></div><div className="set-aside-split" aria-label={`${number(social)} percent social contributions and ${number(tax)} percent tax prepayments`}><span style={{ width: `${social}%` }} /><span style={{ width: `${tax}%` }} /></div><div className="envelope-grid"><p><b>{number(social)}%</b>Social contributions<br /><small>{envelope.social_contributions?.next_amount ? `${money(envelope.social_contributions.next_amount)} around ${date(envelope.social_contributions.next_expected)}` : envelope.social_contributions?.note}</small></p><p><b>{number(tax)}%</b>Tax prepayments<br /><small>{envelope.tax_prepayments?.next_deadline ? `Deadline ${date(envelope.tax_prepayments.next_deadline)}` : envelope.tax_prepayments?.note}</small></p>{last && <p><b>{money(last.total)}</b>from last invoice<br /><small>{money(last.amount)} from {last.counterparty}</small></p>}</div><p className="envelope-why"><b>Why this estimate</b>{envelope.social_contributions?.note}</p><details className="envelope-details"><summary>VAT, sources and assumptions</summary><p>{envelope.vat?.note}</p>{envelope.sources?.length > 0 && <ul>{envelope.sources.map((source) => <li key={source}><a href={source} target="_blank" rel="noopener noreferrer">{source}</a></li>)}</ul>}</details><p className="tax-disclaimer"><Icon name="warning" size={14} /> {envelope.disclaimer}</p></section>;
+}
+
+function MomentCard({ moment, primary, onTopic, onView }) {
   const topic = moment.topic;
-  return <article className={`moment-card ${primary ? "primary" : ""} ${moment.sales ? "product-moment" : "help-moment"}`}><div className="moment-top"><span className="fine-label">{moment.sales ? "RELEVANT NEXT STEP" : "HELP FIRST"}</span>{moment.sales ? <Icon name="spark" /> : <Icon name="shield" />}</div><h3>{moment.title}</h3><p>{moment.body}</p>{topic ? <button type="button" onClick={() => onTopic(topic)}>{moment.sales ? "Explore the context" : "See the plan"}<Icon name="arrow" size={15} /></button> : <span className="plain-action">Your plan is ready <Icon name="check" size={15} /></span>}</article>;
+  const foresight = moment.kind === "overdraft_warning" || moment.kind === "self_employed_reserve";
+  const action = topic ? () => onTopic(topic) : foresight ? () => onView?.("foresight") : () => onView?.("foresight");
+  const label = topic ? (moment.sales ? "Explore the context" : "See the plan") : moment.kind === "overdraft_warning" ? "See projection" : moment.kind === "self_employed_reserve" ? "See set-aside guide" : "See the plan";
+  return <article className={`moment-card ${primary ? "primary" : ""} ${moment.sales ? "product-moment" : "help-moment"}`}><div className="moment-top"><span className="fine-label">{moment.sales ? "RELEVANT NEXT STEP" : "HELP FIRST"}</span>{moment.sales ? <Icon name="spark" /> : <Icon name="shield" />}</div><h3>{moment.title}</h3><p>{moment.body}</p><button type="button" onClick={action}>{label}<Icon name="arrow" size={15} /></button></article>;
 }
 
 function ProductComparison({ publicExperience, experience, topics, topic, onTopic, busy }) {

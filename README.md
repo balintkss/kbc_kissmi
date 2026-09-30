@@ -193,7 +193,7 @@ The generator is seeded, so everyone gets the same customers and transactions. P
 - [x] Money-stress demo persona (5, Jens): sales held back, support first
 - [x] Money foresight: overdraft early warning, payday sorter (approve-to-act, simulated), self-employed reserve
 - [x] Test suite: 492 tests, all passing (`python -m pytest -q`)
-- [x] App + website frontends (`web/`): customer login, payday plan, product comparison, glass box with fact correction, Kate and support-first state
+- [x] App + website frontends (`web/`): customer login, payday plan, safe-to-spend forecast, approval-only payday sorter, product comparison, glass box with fact correction, Kate and support-first state
 - [ ] Aikido scan before/after, demo video
 
 Product names follow KBC's product families, but descriptions and rates in `twin/catalog.py` are illustrative placeholders, not real KBC terms.
