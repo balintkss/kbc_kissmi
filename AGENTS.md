@@ -28,6 +28,7 @@ Team: **A** = backend (data, twin, recommender, API, Kate; built with Claude). *
 | `SUBMISSION_CHECKLIST.md` | Pre-submit checklist (repo public, secrets, Aikido, video) | Both |
 | `docs/PITCH.md`, `docs/DEMO_SCRIPT.md` | Builderbase texts, elevator pitch, judge Q&A, scale & LLM cost numbers; 2:45 shot-by-shot video script + demo reset SQL | Both. Read before building demo screens |
 | `docs/KBC_VALUE_MATRIX.md` | KBC product-value matrix, competitive narrative, product guardrails and presentation-ready proof points | Both. Use for pitch, presentation and product decisions |
+| `docs/PRIVATE_BANKER_AT_SCALE.md` | Business case: private-banker-quality-at-scale framing, pilot metrics and a purpose-limited fraud extension | Both. Use for business case, judge Q&A and roadmap; fraud must remain separate from commercial profiling |
 | `twin/feedback.py` | Applies customer corrections to a twin (marks facts, recomputes the plan) | **A: do not edit** |
 | `twin/benchmark.py` | Read-only speed benchmark behind the 2.3M projection | A |
 | `docs/DATABASE_HANDOFF.md` | Database and API connection contract for humans and coding agents | Read before any database or frontend integration |

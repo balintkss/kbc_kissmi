@@ -136,3 +136,4 @@ Each question contains **Why am I seeing this?**, **Not now**, and **Don't use t
 
 - Existing internal research: [`kbc_retail_insurance.md`](research/kbc_retail_insurance.md), [`kbc_invest_business.md`](research/kbc_invest_business.md), and [`kate_ecosystem_pfa.md`](research/kate_ecosystem_pfa.md).
 - Pitch, demo sequence and technical proof: [`PITCH.md`](PITCH.md) and [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md).
+- Business rationale, pilot metrics and the purpose-limited fraud-prevention extension: [`PRIVATE_BANKER_AT_SCALE.md`](PRIVATE_BANKER_AT_SCALE.md).
