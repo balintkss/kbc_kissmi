@@ -277,3 +277,10 @@ from api.ops import pages as ops_pages, router as ops_router  # noqa: E402  (ops
 
 app.include_router(ops_router)   # /api/ops/*
 app.include_router(ops_pages)    # /ops dashboard (static, same origin)
+
+
+# ---------------------------------------------------------------------- money foresight (api/routes_foresight.py)
+
+from api.routes_foresight import router as foresight_router  # noqa: E402  (customer token only)
+
+app.include_router(foresight_router)  # /api/me/forecast, /api/me/payday-sorter*, /api/me/self-employed, /api/me/moments-plus

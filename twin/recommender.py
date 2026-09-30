@@ -3,6 +3,7 @@
   page(twin, topic)  -> one highlighted variant with the reason, alternatives collapsed
                         (twin=None -> the generic page every anonymous visitor gets)
   moments(twin)      -> proactive push messages, with the ones we deliberately hold back
+                        (moments(twin, extra=[...]) also ranks prebuilt ones, e.g. twin.forecast.foresight_moments)
 
 The same JSON feeds the app, the website and any other channel.
 
@@ -243,14 +244,18 @@ def page(twin, topic):
                 alternatives=[dict(id=v["id"], name=v["name"], summary=v["summary"]) for v in variants if v["id"] != vid])
 
 
-def moments(twin, max_push=2):
-    """Proactive messages ranked by priority. Sales messages are held back when the customer is under money stress."""
+def moments(twin, max_push=2, extra=None):
+    """Proactive messages ranked by priority. Sales messages are held back when the customer is under money stress.
+
+    extra: optional prebuilt moment dicts (kind, priority, title, body, topic?, sales?), e.g. the foresight moments
+    from twin.forecast.foresight_moments(): overdraft_warning (94) and self_employed_reserve (88). They are ranked
+    and held back by the same rules. With extra=None the result is exactly what it always was."""
     f = lambda k: _fact(twin, k)  # noqa: E731
     plan, stress = twin.get("plan"), f("money_stress")
     out, held = [], []
 
     def add(kind, priority, title, body, topic=None, sales=False):
-        m = dict(kind=kind, priority=priority, title=title, body=body, topic=topic, sales=sales)
+        m = dict(kind=kind, priority=priority, title=title, body=body, topic=topic, sales=bool(sales))
         if sales and stress:
             held.append(dict(m, held_because="Customer shows money stress: no product offers, only support."))
         else:
@@ -291,5 +296,7 @@ def moments(twin, max_push=2):
         if job:
             employer = f" from {job['value']}" if job.get("value") else ""
             add("new_job", 70, "New job, new plan", f"Your salary{employer} changes your budget: here's your updated payday plan and a savings suggestion.", "savings", sales=True)
+    for m in extra or ():
+        add(m["kind"], m["priority"], m["title"], m["body"], m.get("topic"), m.get("sales", False))
     out.sort(key=lambda m: -m["priority"])
     return dict(push=out[:max_push], feed=out[max_push:], held_back=held)
