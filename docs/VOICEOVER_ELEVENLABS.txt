@@ -1,0 +1,29 @@
+CLIP 1 (0:00-0:11)
+Your bank sees every payment you make, and still treats you like a stranger. You fill in forms, you explain yourself again, and every page shows you every option.
+
+CLIP 2 (0:11-0:31)
+Meet Lotte, twenty-nine, from Ghent. She never told K-B-C she bought a car. Kate Plus worked it out from a garage payment in June, and the fuel after it. Ninety percent confident, with the proof, transaction by transaction. And it knows what a car implies: maintenance, road tax, and insurance at Ethias, not K-B-C.
+
+CLIP 3 (0:31-0:46)
+The app doesn't sell her anything. It plans, and it warns her early: before payday she'd dip below zero, so move eleven hundred and seventy euros from savings. On payday: bills, a car reserve, savings, and a hundred and fifty-one euros a week to spend.
+
+CLIP 4 (0:46-1:05)
+Same page on the website. A stranger gets three options. Lotte gets one: mini-omnium, and the reason. It fits a second-hand car, and we can quote in two minutes, because we already know it. App, website, adviser: Kate Plus uses one governed memory, through one A-P-I, for the same answer.
+
+CLIP 5 (1:05-1:26)
+Now she asks Kate Plus, in Dutch: can I afford a twelve-hundred-euro trip in August? No salary, no rent, no savings typed in. Kate Plus runs on G-P-T four point one, like K-B-C's Kate, but never does the maths herself. A tool computes on Lotte's governed financial memory, and only hers. Yes: from savings, with her three-month buffer intact.
+
+CLIP 6 (1:26-1:41)
+This synthetic scenario tests a family journey. In production, K-B-C never deduces a birth, or any health information, from a payment. Julien first chooses to confirm a household change. Then Kate can offer a relevant next step, in French. The customer stays in control.
+
+CLIP 7 (1:41-1:55)
+Marc is self-employed. His income swings almost fifty percent from month to month. So his plan is built on a quiet month, and it warns him early: a slow month leaves him three hundred and eighty-eight euros short. Help first.
+
+CLIP 8 (1:55-2:22)
+Behind it: five thousand twins, built in about eighty seconds on one laptop core, with zero L-L-M calls. When money is tight, we stay quiet: a hundred and two sales messages held back. Jens, a student, was in the red forty-six of the last ninety days. His insurance offer is held back; he gets help moving a bill instead, and the adviser sees the same context. All two point three million customers: about twenty minutes on thirty-two cores.
+
+CLIP 9 (2:22-2:35)
+And when the twin is wrong... Marc has a cat, not a dog... he just says: that's not me. The fact stops driving anything, and his plan updates on the spot.
+
+CLIP 10 (2:35-2:45)
+Kate Plus gives every customer one governed financial memory, across every channel. Help before sales, and a glass box you control.
