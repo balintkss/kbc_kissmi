@@ -115,6 +115,14 @@ employment & employer · net income & payday · job change / first job · car (c
 
 Personas 1–4 are hand-written in `data/generate_db.py`; persona 5 is an ordinary seeded customer flagged via `EXTRA_DEMO_IDS`.
 
+## Team & tools
+
+- **Team:** Mihály Németh (backend: data, twin engine, API, Kate, tests) · [@balintkss](https://github.com/balintkss) (frontend `web/`, positioning docs)
+- **Partner tech:** ElevenLabs (demo video voice-over) · Aikido (security audit)
+- **Also used:** OpenAI GPT-4.1 (Kate's language only; the twin itself uses no LLM) · Claude Code (development)
+- **Demo video:** link in the Builderbase submission
+- All customer data in this repository is **synthetic**; product names and rates are illustrative.
+
 ## Run it
 
 `requirements.txt` is a pinned lockfile (every transitive dependency; `pip-audit`: no known vulnerabilities). The loose top-level ranges live in `requirements.in`; the frontend is locked by `web/package-lock.json` (`npm audit`: 0 vulnerabilities).
