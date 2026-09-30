@@ -117,6 +117,8 @@ Personas 1–4 are hand-written in `data/generate_db.py`; persona 5 is an ordina
 
 ## Run it
 
+`requirements.txt` is a pinned lockfile (every transitive dependency; `pip-audit`: no known vulnerabilities). The loose top-level ranges live in `requirements.in`; the frontend is locked by `web/package-lock.json` (`npm audit`: 0 vulnerabilities).
+
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python data/generate_db.py          # ~10 s, creates data/kbc_twin.db (git-ignored, 300 MB)
