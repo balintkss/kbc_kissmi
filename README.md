@@ -77,7 +77,7 @@ twin/recommender.py      page(twin, topic)  → one highlighted variant + reason
 twin/catalog.py          moments(twin)      → push / feed / held-back messages
         │
         ▼
-api/                     FastAPI, one API for all channels (in progress)
+api/                     FastAPI, one API for all channels: login, experience blocks, twin, plan, moments, feedback
         │
         ▼
 app + website            render the same experience blocks (to do)
@@ -104,14 +104,28 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m twin.engine               # ~80 s, builds all 5K twins
 .venv/bin/python -m twin.evaluate             # accuracy vs. hidden truth
 .venv/bin/python -m twin.engine --customer 1  # print Lotte's twin as JSON
+.venv/bin/python -m api.seed_credentials      # logins; demo persona passwords -> data/demo_credentials.txt (git-ignored)
+TWIN_SECRET=$(openssl rand -hex 32) .venv/bin/uvicorn api.main:app --reload   # API docs at http://localhost:8000/api/docs
 ```
+
+### API (same JSON for app and website)
+
+| Endpoint | Auth | What it returns |
+|---|---|---|
+| `POST /api/auth/login` | – | `{customer_id, password}` → bearer token (1 h). Rate-limited. |
+| `GET /api/experience/{topic}?channel=app\|web` | optional | Anonymous: all variants. Logged in: **one highlight + reason + facts**, alternatives collapsed. Topics: `car_loan`, `car_insurance`, `savings`, `home`, `family` |
+| `GET /api/me/twin?with_evidence=true` | required | Glass box: every fact, confidence, since, implications and the proving transactions |
+| `GET /api/me/plan` | required | Payday plan: bills, reserves, savings, free to spend per week |
+| `GET /api/me/moments` | required | `push` (max 2), `feed`, and `held_back` (sales suppressed under money stress) |
+| `POST /api/me/facts/{fact}/feedback` | required | `{correct, note}` — the customer corrects their twin; rejected facts stop driving recommendations |
 
 The generator is seeded, so everyone gets the same database.
 
 ## Security (Aikido audit = 10% of the score)
 
-- The customer id always comes from the signed session token, never from the URL → no IDOR.
-- Passwords PBKDF2-hashed with a per-user salt; secrets only in `.env` (git-ignored); no real customer data anywhere.
+- The customer id always comes from the signed session token (HMAC-SHA256, 1 h expiry), never from the URL or body → no IDOR. Evidence queries are also scoped by `customer_id`.
+- Passwords PBKDF2-SHA256 with a per-user salt; login rate-limited per IP and per customer; strict CORS; security headers.
+- `TWIN_SECRET` comes from the environment (see `.env.example`); without it a random per-process secret is used. No real customer data anywhere.
 - `truth_*` tables are for evaluation only and never exposed through the API.
 
 ## Status / unfinished
@@ -120,8 +134,8 @@ The generator is seeded, so everyone gets the same database.
 - [x] Twin engine: facts, implications, recurring bills, payday plan
 - [x] Evaluation against ground truth
 - [x] Recommender: highlight-one pages + push moments with silence rules
-- [ ] API with login (FastAPI) — in progress
-- [ ] Customer correction of facts ("that's not right")
+- [x] API with login, experience blocks, glass-box twin, plan, moments
+- [x] Customer correction of facts ("that's not right") — note: the payday plan is precomputed, so a rejected car still shows its reserve until the twin is rebuilt
 - [ ] LLM chat over the twin ("pull"), in the customer's language (nl/fr/en)
 - [ ] App + website frontends, ops dashboard for the 5K population
 - [ ] Aikido scan before/after, demo video
