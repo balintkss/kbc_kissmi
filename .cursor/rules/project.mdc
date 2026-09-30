@@ -1,0 +1,18 @@
+---
+description: KBC Digital Twin: follow AGENTS.md (single source of truth) and the frontend security rules
+globs: ["**/*"]
+alwaysApply: true
+---
+
+Read and follow `AGENTS.md` at the repo root before making any change. It has the repo map, run commands, API contract, screens to build and working rules.
+Don't edit `twin/`, `api/` or `data/generate_db.py`. They are owned by person A, so propose API changes instead. The frontend lives in `web/`.
+Never commit or print `.env`, `data/*.db` or `data/demo_credentials.txt`.
+
+Frontend security rules (Aikido scans the frontend too):
+
+- Keep the bearer token in memory (`sessionStorage` at most). Never use `localStorage` or JS-set cookies.
+- Never render API or LLM text as HTML. No `innerHTML`, `dangerouslySetInnerHTML`, `v-html` or markdown-to-HTML. Kate's answers and transaction descriptions are untrusted, so render them as text.
+- Never put customer ids, tokens, passwords or personal data in URLs, query strings, route params or logs.
+- Never hard-code or bundle any API key or secret (`VITE_*` vars are public). The OpenAI key is backend-only.
+- Identity comes only from the token. Never send `customer_id` to `/api/me/*`. On any 401 (except a failed login), clear the token and return to login.
+- Only well-known dependencies from the npm registry. No analytics, trackers or scripts from untrusted CDNs.

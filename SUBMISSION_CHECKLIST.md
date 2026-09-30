@@ -20,8 +20,9 @@ Owner: **A** = backend/Claude side, **B** = frontend teammate, **Both** = check 
 - [x] `.env` is git-ignored; only `.env.example` with placeholders is committed — checked
 - [x] Secret scan of full git history: no GitHub/Anthropic/Google keys or passwords — checked
 - [ ] **Re-run the scan right before submitting** (new commits since): 
-      `git log --all -p | grep -inE "gho_|ghp_|sk-ant|AIza|api_key|password *=" ` — A
-- [ ] LLM key (Gemini / Anthropic) only read from the environment, never hard-coded, never in frontend code — A
+      `git log --all -p | grep -inE "sk-proj-|sk-[A-Za-z0-9]{20}|gho_|ghp_|sk-ant|AIza|api_key *=|password *=" ` — A
+- [ ] OpenAI key only in the git-ignored `.env` (backend), never hard-coded, never in frontend code — A
+- [ ] **Revoke the OpenAI key after the hackathon** (it was shared in a chat transcript) — A
 - [ ] No GCP credentials (they're personal and valid 1 week) in any file, screenshot or video — Both
 - [ ] Demo video and screenshots don't show demo passwords, tokens, or your terminal with env vars — Both
 - [ ] All customer data is synthetic — say so in README and video (already in README) — Both
