@@ -195,6 +195,12 @@ The generator is seeded, so everyone gets the same customers and transactions. P
 - [x] Money foresight: overdraft early warning, payday sorter (approve-to-act, simulated), self-employed reserve
 - [x] Test suite: 513 tests, all passing (`python -m pytest -q`)
 - [x] App + website frontends (`web/`): customer login, payday plan, safe-to-spend forecast, approval-only payday sorter, product comparison, glass box with fact correction, Kate and support-first state
+- [x] Life moments & gaps: checklists auto-ticked from the twin, coverage-gap finder, benefits hints with official sources (`/api/me/life-checklists`, `/coverage-gaps`, `/benefits`)
+- [x] Confirmation gate: highlights built only on inferred facts ask "Is that right?" before any sales CTA; family content only after the customer confirms a household change
+- [x] Scalability study for 2.3M customers (`docs/SCALABILITY.md`): partitioned backfill, incremental daily update (verified equal to a full rebuild), cost model
+- [x] Fresh clone from public GitHub → README steps → 513 tests passing in ~2.5 min (verified 30 Sep 2026)
 - [ ] Aikido scan before/after, demo video
+- [ ] Not built: "Kate remembered" (facts stated in chat, confirmed by the customer, with Edit/Forget) — designed in `docs/KBC_SERVICE_MAP.md` §6, not implemented
+- [ ] Production hardening not done: Kate's prompt still includes the customer's first name, age and city (drop name/city before real use); SQLite only (Cloud SQL migration in `docs/DATABASE_HANDOFF.md`)
 
 Product names follow KBC's product families, but descriptions and rates in `twin/catalog.py` are illustrative placeholders, not real KBC terms.

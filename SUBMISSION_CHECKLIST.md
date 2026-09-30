@@ -6,8 +6,8 @@ Owner: **A** = backend/Claude side, **B** = frontend teammate, **Both** = check 
 
 ## 1. Repository (rules: public, accessible until judging is done)
 
-- [ ] **Make the repo public**: `gh repo edit balintkss/kbc_kissmi --visibility public --accept-visibility-change-consequences` (currently **PRIVATE**) — Both
-- [ ] Open the repo link in an **incognito window** and confirm it loads without login — Both
+- [x] **Repo is public** — verified 30 Sep: cloned from GitHub with no credentials — Both
+- [x] Repo loads without login (anonymous clone worked); open it once in incognito before submitting — Both
 - [ ] Everything is pushed: `git status` clean and `git log origin/main -1` = your last local commit — Both
 - [ ] Tag the submitted version: `git tag submission && git push origin submission` — A
 - [ ] No commits after the submission (judges assess the submitted version) — Both
@@ -21,7 +21,7 @@ Owner: **A** = backend/Claude side, **B** = frontend teammate, **Both** = check 
 - [x] Secret scan of full git history: no GitHub/Anthropic/Google keys or passwords — checked
 - [ ] **Re-run the scan right before submitting** (new commits since): 
       `git log --all -p | grep -inE "sk-proj-|sk-[A-Za-z0-9]{20}|gho_|ghp_|sk-ant|AIza|api_key *=|password *=" ` — A
-- [ ] OpenAI key only in the git-ignored `.env` (backend), never hard-coded, never in frontend code — A
+- [x] OpenAI key only in the git-ignored `.env` (backend), never hard-coded, never in frontend code — checked: full-history scan + `web/` scan clean — A
 - [ ] **Revoke the OpenAI key after the hackathon** (it was shared in a chat transcript) — A
 - [ ] No GCP credentials (they're personal and valid 1 week) in any file, screenshot or video — Both
 - [ ] Demo video and screenshots don't show demo passwords, tokens, or your terminal with env vars — Both
@@ -41,22 +41,22 @@ Owner: **A** = backend/Claude side, **B** = frontend teammate, **Both** = check 
 
 ## 4. It actually works (judging: "Technical ability — does it work?")
 
-- [ ] **Fresh clone test** on the teammate's laptop, following only the README "Run it" section, start to finish — B
-- [ ] `requirements.txt` complete (fastapi, uvicorn, pandas, httpx, + LLM SDK once added) — A
-- [ ] `python -m twin.evaluate` output matches the numbers in the README — A
-- [ ] Demo personas 1–4 and 5 (Jens, customer id 113) each log in and show a sensible highlight, plan and push; Jens shows the support push and a held-back sales message — Both
-- [ ] `.venv/bin/python -m pytest -q` is green (no real OpenAI calls; needs `requirements-dev.txt`) — A
+- [x] **Fresh clone test**: public clone → README "Run it" → 513 tests pass, frontend builds, all 5 personas log in (A, 30 Sep). B: run `web/` once on your laptop too — B
+- [x] `requirements.txt` complete — verified by the fresh clone — A
+- [x] `python -m twin.evaluate` output matches the numbers in the README — verified on the fresh clone — A
+- [x] Demo personas 1–4 and 5 (Jens, customer id 113) each log in and show a sensible highlight, plan and push; Jens shows the support push and a held-back sales message — Both — verified over HTTP on the fresh clone
+- [x] `.venv/bin/python -m pytest -q` is green: 513 passed (fresh clone) — A
 - [ ] Anonymous vs. logged-in page difference is visible in the demo — B
 - [ ] Customer correction ("that's not me") works in the UI — B
-- [ ] Chat (pull) answers in the customer's language and uses twin context — A
-- [ ] No crash on edge cases in the demo path (wrong password, expired token, unknown topic) — Both
+- [x] Chat (pull) answers in the customer's language and uses twin context — verified live (nl/fr/en) — A
+- [x] No crash on edge cases in the API (wrong password 401, garbage/expired token 401, unknown topic 404) — check the same in the UI — Both
 - [ ] If there's a hosted demo: link works from a phone on mobile data — Both
 
 ## 5. README (rules: explain project, how to run, anything unfinished)
 
 - [ ] Concept + USP understandable in 30 seconds (top of README) — Both
 - [ ] Run instructions correct after the last changes (frontend start command added) — B
-- [ ] "Status / unfinished" section honest and up to date — A
+- [x] "Status / unfinished" section honest and up to date (incl. what was not built) — A
 - [ ] Team members named — Both
 - [ ] Mention partner tech used (Google Cloud / ElevenLabs / Cursor) if used — Both
 - [ ] Links in README work (demo video, hosted demo if any) — Both
