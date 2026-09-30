@@ -95,7 +95,7 @@ api/                     FastAPI, one API for all channels: login, experience bl
         │                api/routes_foresight.py + twin/forecast.py, sorter.py, selfemployed.py → money foresight (forecast, payday sorter, self-employed reserve)
         │
         ▼
-web/                     customer app view + website view, rendering the same experience blocks (owned by our frontend teammate, in progress)
+web/                     Kate+ customer app + website view, rendering the same experience blocks
 dashboard/               ops / advisor view, served by the API at /ops (static, same origin, strict CSP)
 ```
 
