@@ -6,8 +6,8 @@
 ## 1. Project in 5 lines
 
 1. **Challenge (KBC):** *"a scalable personalization approach that fundamentally strengthens the relationship between KBC and its customers"*, for 2.3M customers.
-2. **Idea:** every customer gets a living **digital twin**, a picture of their life inferred from their transactions (car, baby, move, new job, payday, bills...), where each fact has a confidence score and the transactions that prove it.
-3. **Promise to the customer:** *"KBC already knows me. I don't have to explain anything."*
+2. **Idea:** every customer gets a living **digital twin**, a customer-governed picture of their financial life inferred from non-sensitive transaction patterns (car, move, new job, payday, bills...), where each fact has a confidence score and the transactions that support it.
+3. **Promise to the customer:** *"KBC helps me without making me repeat myself — and I stay in control."*
 4. **Push + pull:** proactive moments (payday plan, life events; sales are held back under money stress) plus **Kate**, a GPT-4.1 chat that uses the twin as memory and tools for every number.
 5. **Glass box:** the customer sees what KBC believes and can correct it ("That's right" / "That's not me").
 
@@ -18,6 +18,8 @@
 
 Team: **A** = backend (data, twin, recommender, API, Kate; built with Claude). **B** = frontend (phone-style app view + website view).
 
+> **Production boundary:** The synthetic generator contains newborn and family facts solely to test the end-to-end pipeline. Do not present transaction-based inference of pregnancy, birth, healthcare, mental health or other special-category data as a deployable feature. In production, the customer can voluntarily confirm a neutral household change; sensitive data is neither inferred nor used for marketing, pricing, eligibility or automated decisions.
+
 ## 2. Repo map
 
 | Path | What it is | Owner / rule |
@@ -25,6 +27,7 @@ Team: **A** = backend (data, twin, recommender, API, Kate; built with Claude). *
 | `README.md` | Pitch, results, run instructions, status | Both. B adds the frontend run command and status |
 | `SUBMISSION_CHECKLIST.md` | Pre-submit checklist (repo public, secrets, Aikido, video) | Both |
 | `docs/PITCH.md`, `docs/DEMO_SCRIPT.md` | Builderbase texts, elevator pitch, judge Q&A, scale & LLM cost numbers; 2:45 shot-by-shot video script + demo reset SQL | Both. Read before building demo screens |
+| `docs/KBC_VALUE_MATRIX.md` | KBC product-value matrix, competitive narrative, product guardrails and presentation-ready proof points | Both. Use for pitch, presentation and product decisions |
 | `twin/feedback.py` | Applies customer corrections to a twin (marks facts, recomputes the plan) | **A: do not edit** |
 | `twin/benchmark.py` | Read-only speed benchmark behind the 2.3M projection | A |
 | `docs/DATABASE_HANDOFF.md` | Database and API connection contract for humans and coding agents | Read before any database or frontend integration |

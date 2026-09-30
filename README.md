@@ -6,6 +6,8 @@
 
 Every customer gets a **living digital twin** — a picture of their life inferred from what they already do with their bank — so that every channel (app, website, advisor, notifications) knows the context and **never makes the customer explain themselves again**.
 
+> **Production boundary:** this repository is a synthetic proof of the pipeline. A real KBC rollout would infer only non-sensitive financial context, let the customer confirm a neutral household change, and never infer health, mental-health, pregnancy or other special-category data from transactions. No inferred fact can drive marketing, pricing, eligibility or an automated financial decision without the customer’s explicit step and the applicable KBC process.
+
 ## Why this, and not "another feature"
 
 KBC is already far ahead: Kate has 6M users, proactive nudges in 140+ situations, budgets, subscription overviews and duplicate-payment alerts. Everyone will build "categorize transactions → recommend a product". We don't compete with that — we build the layer underneath it:
