@@ -143,6 +143,7 @@ cd web && npm install && npm run dev           # Node 20.19+ / 22.12+ · http://
 | Endpoint | Auth | What it returns |
 |---|---|---|
 | `POST /api/auth/login` | – | `{customer_id, password}` → bearer token (1 h). Rate-limited: 5 **failed** attempts per 5 min per IP and per customer (successful logins don't count) |
+| `POST /api/auth/demo-login` | – | `{customer_id}` → bearer token **without a password, only for the 5 synthetic demo personas** (1, 2, 3, 4, 113; others 403). The app's persona cards use it. Disable with `TWIN_DEMO_LOGIN=0` |
 | `GET /api/topics` | – | The product topics: `[{id, title}]` |
 | `GET /api/experience/{topic}?channel=app\|web\|advisor` | optional | Anonymous: all variants. Logged in: **one highlight + reason + facts**, alternatives collapsed. Topics: `car_loan`, `car_insurance`, `savings`, `home`, `family` |
 | `GET /api/me` | required | Who is logged in: `{customer_id, name, first_name, language, city, age, kbc_products}` |
@@ -203,6 +204,7 @@ The generator is seeded, so everyone gets the same customers and transactions. P
 - [x] Fresh clone from public GitHub → README steps → 513 tests passing in ~2.5 min (verified 30 Sep 2026)
 - [ ] Aikido scan before/after, demo video
 - [ ] Not built: "Kate remembered" (facts stated in chat, confirmed by the customer, with Edit/Forget) — designed in `docs/KBC_SERVICE_MAP.md` §6, not implemented
+- [ ] Known, accepted for the demo: one-click `POST /api/auth/demo-login` has no password by design. It only issues ordinary customer-scoped tokens for the 5 flagged **synthetic** demo personas, is rate-limited, and switches off with `TWIN_DEMO_LOGIN=0`; a real deployment would not ship it
 - [ ] Production hardening not done: Kate's prompt still includes the customer's first name, age and city (drop name/city before real use); SQLite only (Cloud SQL migration in `docs/DATABASE_HANDOFF.md`)
 
 Product names follow KBC's product families, but descriptions and rates in `twin/catalog.py` are illustrative placeholders, not real KBC terms.

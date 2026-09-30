@@ -139,6 +139,29 @@ def login(body: Login, request: Request, con=Depends(db)):
     return {"token": issue_token(body.customer_id), "token_type": "bearer", "expires_in": 3600}
 
 
+class DemoLogin(BaseModel):
+    customer_id: int = Field(gt=0, lt=2**31)
+
+
+@app.post("/api/auth/demo-login")
+def demo_login(body: DemoLogin, request: Request, con=Depends(db)):
+    """One-click login for the flagged SYNTHETIC demo personas only (customers.is_demo_persona = 1), no password.
+
+    Deliberate demo convenience: every other customer still needs POST /api/auth/login. The token is an ordinary
+    customer token (same role, TTL and scoping), so it only ever opens that persona's own data. Disable with
+    TWIN_DEMO_LOGIN=0; a real deployment would not ship this endpoint.
+    """
+    if os.environ.get("TWIN_DEMO_LOGIN", "1") == "0":
+        raise HTTPException(404, "Not found")
+    ip = request.client.host if request.client else "unknown"
+    if _rate_limited(f"demo:{ip}", limit=30, window=60):
+        raise HTTPException(429, "Too many attempts, try again in a minute")
+    row = con.execute("SELECT is_demo_persona FROM customers WHERE customer_id = ?", (body.customer_id,)).fetchone()
+    if not row or not row[0]:
+        raise HTTPException(403, "One-click login is only available for the synthetic demo personas")
+    return {"token": issue_token(body.customer_id), "token_type": "bearer", "expires_in": 3600, "demo": True}
+
+
 def _customer_from_header(authorization):
     if not authorization:
         return None

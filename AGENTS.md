@@ -108,6 +108,9 @@ Base: `http://localhost:8000`. JSON in and out. Auth: header `Authorization: Bea
 
 Errors are `{"detail": "..."}`. **Rate limits** are in memory and reset on API restart. Login allows **5 failed attempts per 5 min per IP and per customer id**. Successful logins don't count (and a success resets that customer's counter), so logging personas in and out during the demo is fine. The 6th failure within 5 min gives 429, even with the right password. Chat allows 20 messages/min per customer; the payday-sorter POSTs (approve + revoke together) 10/min per customer.
 
+### POST /api/auth/demo-login (no auth): what the app's persona cards use
+`{"customer_id": 2}` → `{"token", "token_type": "bearer", "expires_in": 3600, "demo": true}`. **No password**, but only for the 5 synthetic demo personas (1 Lotte, 2 Julien, 3 Emma, 4 Marc, 113 Jens); any other id gets 403, bad bodies 422, 30/min per IP then 429, and `TWIN_DEMO_LOGIN=0` turns it off (404). The token is an ordinary customer token. The login screen is just the persona cards: a click signs in (`web/src/App.jsx` `Login`/`signIn`).
+
 ### POST /api/auth/login (no auth)
 ```json
 // request                                  // 200

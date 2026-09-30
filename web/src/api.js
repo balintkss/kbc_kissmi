@@ -31,7 +31,7 @@ export async function api(path, { method = "GET", body, auth = true } = {}) {
     referrerPolicy: "no-referrer",
   });
 
-  if (response.status === 401 && path !== "/auth/login") {
+  if (response.status === 401 && !path.startsWith("/auth/")) {
     clearAccessToken();
     window.dispatchEvent(new Event("twin:session-ended"));
   }

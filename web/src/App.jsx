@@ -175,17 +175,18 @@ function App() {
     }
   };
 
-  const signIn = async ({ customerId, password }) => {
+  const signIn = async ({ customerId }) => {
     setBusy(true);
     setNotice("");
     try {
-      const loggedIn = await api("/auth/login", { method: "POST", body: { customer_id: Number(customerId), password }, auth: false });
+      // One-click login for the synthetic demo personas only (POST /api/auth/demo-login, no password).
+      const loggedIn = await api("/auth/demo-login", { method: "POST", body: { customer_id: Number(customerId) }, auth: false });
       setAccessToken(loggedIn.token);
       setSession({ expiresIn: loggedIn.expires_in });
       await Promise.all([loadTopics(), loadCustomer(topic), loadPublicExperience(topic)]);
       setView("home");
     } catch (error) {
-      setNotice(error?.status === 401 ? "The customer ID or password is not recognised." : friendlyError(error, "sign in"));
+      setNotice(error?.status === 403 ? "Only the synthetic demo personas can be opened here." : friendlyError(error, "sign in"));
       clearAccessToken();
       setSession(null);
     } finally {
@@ -303,9 +304,7 @@ function Notice({ text, onDismiss }) {
 }
 
 function Login({ onSignIn, busy }) {
-  const [customerId, setCustomerId] = useState("");
-  const [password, setPassword] = useState("");
-  const submit = (event) => { event.preventDefault(); if (customerId && password) onSignIn({ customerId, password }); };
+  const open = (id) => { if (!busy) onSignIn({ customerId: String(id) }); };
   return <section className="entry">
     <div className="entry-copy">
       <p className="eyebrow">Kate+ · concept prototype</p>
@@ -318,17 +317,12 @@ function Login({ onSignIn, busy }) {
       </div>
     </div>
     <div className="entry-panel">
-      <div className="panel-intro"><p className="eyebrow">Demo access</p><h2>Choose a synthetic scenario</h2><p>Pick a situation, then enter its password from your local demo credentials file. Passwords are never shown or stored here.</p></div>
+      <div className="panel-intro"><p className="eyebrow">Demo access</p><h2>Choose a synthetic scenario</h2><p>Click a situation to open it. These are synthetic customers: no real person, no password.</p></div>
       <div className="persona-grid">
-        {PERSONAS.map((persona) => <button type="button" className={`persona ${customerId === String(persona.id) ? "selected" : ""}`} key={persona.id} onClick={() => setCustomerId(String(persona.id))}>
+        {PERSONAS.map((persona) => <button type="button" className="persona" key={persona.id} disabled={busy} onClick={() => open(persona.id)}>
           <span className="persona-name">{persona.name}<small>{persona.city}</small></span><span>{persona.story}</span>
         </button>)}
       </div>
-      <form className="login-form" onSubmit={submit}>
-        <label>Customer ID<input inputMode="numeric" pattern="[0-9]*" required value={customerId} onChange={(event) => setCustomerId(event.target.value.replace(/\D/g, ""))} placeholder="Choose a scenario above" /></label>
-        <label>Password<input type="password" required value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="off" placeholder="Enter locally generated password" /></label>
-        <button className="primary-button" type="submit" disabled={busy || !customerId || !password}>{busy ? "Connecting…" : "Open Kate+"}<Icon name="arrow" /></button>
-      </form>
       <p className="login-foot"><Icon name="lock" size={15} /> Session stays in memory only. Nothing is saved in this browser.</p>
     </div>
   </section>;
