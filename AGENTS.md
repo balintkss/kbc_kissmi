@@ -60,7 +60,7 @@ Team: **A** = backend (data, twin, recommender, API, Kate; built with Claude). *
 | `requirements.txt`, `.env.example` | Python deps, env placeholders (no real values) | A (coordinate) |
 | `.env` | Local secrets | git-ignored. **Never commit or print** |
 | `web/` *(to create)* | The frontend | **B owns it** |
-| `hello_world.txt`, `kbc_kissmi/` | Leftovers. `kbc_kissmi/` is an untracked stray copy, so don't commit it | Decide together |
+| `kbc_kissmi/` | Untracked local leftover on A's machine; never commit it | – |
 
 **Need a backend change?** Don't edit `twin/*`, `api/*` or `data/generate_db.py`. Send A a short change request instead, e.g.
 `GET /api/me/moments: add "cta_label" to each moment, so the push card button text comes from the engine.`

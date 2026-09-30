@@ -11,7 +11,7 @@ Owner: **A** = backend/Claude side, **B** = frontend teammate, **Both** = check 
 - [ ] Everything is pushed: `git status` clean and `git log origin/main -1` = your last local commit — Both
 - [ ] Tag the submitted version: `git tag submission && git push origin submission` — A
 - [ ] No commits after the submission (judges assess the submitted version) — Both
-- [ ] Optional: delete `hello_world.txt` or keep it — nobody minds, just decide — Both
+- [x] `hello_world.txt` deleted — Both
 
 ## 2. No secrets or private data (rules: "never upload passwords, API keys or confidential data")
 
