@@ -24,6 +24,7 @@ Team: **A** = backend (data, twin, recommender, API, Kate; built with Claude). *
 |---|---|---|
 | `README.md` | Pitch, results, run instructions, status | Both. B adds the frontend run command and status |
 | `SUBMISSION_CHECKLIST.md` | Pre-submit checklist (repo public, secrets, Aikido, video) | Both |
+| `docs/DATABASE_HANDOFF.md` | Database and API connection contract for humans and coding agents | Read before any database or frontend integration |
 | `AGENTS.md`, `CLAUDE.md`, `.cursor/rules/project.mdc` | This guide and its pointers | Both |
 | `data/generate_db.py` | Seeded synthetic Belgian bank: 5K customers, ~2.16M transactions, demo personas 1–4 | **A: do not edit** |
 | `data/kbc_twin.db` | Generated SQLite DB (~300 MB) | git-ignored, regenerate it, never commit |
@@ -256,6 +257,7 @@ export async function api(path, { method = "GET", body, auth = true } = {}) {
 ## 7. Working rules
 
 - **Commit small and often.** Always `git pull --rebase` before `git push`. Never force-push `main`.
+- **Database boundary:** frontend and design agents call `/api/*`; they never connect to SQLite or Cloud SQL directly. Read `docs/DATABASE_HANDOFF.md` before database, deployment, or frontend integration work.
 - **Put the frontend in `web/`.** Add its run command to the README "Run it" section, e.g. `cd web && npm install && npm run dev  # http://localhost:5173`.
 - **Update `.gitignore` for the frontend:** `node_modules/`, `web/dist/`, `web/.vite/`, `*.local`, `.env.*` plus `!.env.example` (so the example stays tracked).
 - **Never commit:** `.env`, `data/*.db`, `data/*.txt` (demo credentials), build output or screenshots with passwords or tokens. Run `git status` before every commit.
